@@ -1,10 +1,8 @@
 # Playground
 
-Interaction components, each presented inside the design's laptop/phone device
-mockup. The first is a responsive article reader built from the Figma frame
-"Line Template (Web)" (node `65:922`).
+Interaction components for different simple ideas on web and mobile, but all web-based.
 
-Vite · React · TypeScript · Tailwind CSS v4 · Framer Motion · glimm
+Vite · React · TypeScript · Tailwind CSS v4 · Framer Motion · glimm · Ditherkit
 
 ```bash
 npm install
