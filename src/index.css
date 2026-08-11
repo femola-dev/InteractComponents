@@ -1,0 +1,413 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@font-face {
+  font-family: 'Exposure Italic';
+  src: url('./assets/fonts/ExposureItalicTrial.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Fallback for the display face, replacing Georgia. The file is Libre
+   Baskerville's *italic* cut, but the descriptor declares font-style: normal on
+   purpose — headline elements request normal, so this guarantees a direct match
+   and keeps the italic voice if Exposure is ever unavailable. Relying on the
+   browser's last-resort italic matching instead proved inconsistent.
+   OFL-licensed, so self-hosting it is redistribution-clean. */
+@font-face {
+  font-family: 'Libre Baskerville';
+  src: url('./assets/fonts/LibreBaskerville-Italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Pretendard Std';
+  src: url('./assets/fonts/PretendardStd-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter Display';
+  src: url('./assets/fonts/InterDisplay-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter Display';
+  src: url('./assets/fonts/InterDisplay-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter Display';
+  src: url('./assets/fonts/InterDisplay-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('./assets/fonts/OpenRunde-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('./assets/fonts/OpenRunde-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('./assets/fonts/OpenRunde-Semibold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('./assets/fonts/OpenRunde-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-display: 'Exposure Italic', 'Libre Baskerville', Georgia, serif;
+  --font-body: 'Pretendard Std', system-ui, sans-serif;
+  /* The Portfolio sheet is set in this end to end, all of it Semibold. */
+  --font-figure: 'Open Runde', system-ui, sans-serif;
+
+  /* House design tokens. Mirror any animated value in src/lib/motion.ts so the
+     CSS and JS halves never drift. */
+
+  /* Vertical chrome. The mockup is pinned to the viewport, so every fixed
+     offset above the reading pane is height the article can never use — and
+     the pane, as the only flexible element, absorbs the entire loss when the
+     viewport gets short (browser zoom, small laptops). These hold the exact
+     Figma value at the design's height and only yield below it. */
+  --spacing-frame-top: clamp(16px, 5vh, 40px); /* Figma 40 */
+  --spacing-band-gap: clamp(12px, 4.75vh, 38px); /* Figma 38 */
+  --spacing-read-top: clamp(16px, 6vh, 48px); /* Figma 48 */
+  --spacing-read-bottom: clamp(64px, 14vh, 112px); /* Figma 112 */
+  --spacing-read-gap: clamp(20px, 5vh, 40px); /* Figma 40 */
+
+  /* Below this the frame stops shrinking and the page scrolls instead, so the
+     article never collapses to nothing. */
+  --spacing-frame-floor: 560px;
+
+  /* Corner radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 24px;
+
+  /* Duration */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 280ms;
+
+  /* Easing — CSS string form; motion.ts holds the array form Framer Motion needs. */
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.17, 1, 0.32, 1);
+  --ease-spring: cubic-bezier(0.35, 1.55, 0.65, 1);
+  --ease-in-out: cubic-bezier(0.66, 0, 0.34, 1);
+
+  /* Layered light, not a single blur. The hairline ring replaces the border. */
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.02),
+    0 0 0 0.5px rgba(0, 0, 0, 0.08);
+
+  --shadow-elevated:
+    0 4px 8px rgba(0, 0, 0, 0.02), 0 8px 12px rgba(0, 0, 0, 0.02),
+    0 2px 4px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04),
+    0 0 0 0.5px rgba(0, 0, 0, 0.08);
+
+  --color-hairline: #eaeaea;
+  --color-bezel: #cccccc;
+  --color-ink: #000000;
+  --color-muted: #8d8d8d;
+  --color-outline: #555555;
+  --color-minimap: #888888;
+  --color-minimap-idle: #eaeaea;
+  --color-rule: #e0e0e0;
+
+  --color-quote: #ecfdf5;
+  --color-quote-edge: #d5eee2;
+  --color-quote-ink: #00351c;
+
+  --color-tag-ai: #c4ffe9;
+  --color-tag-ai-ink: #011b11;
+  --color-tag-tech: #ffcdf2;
+  --color-tag-tech-ink: #300124;
+  --color-tag-design: #fe997d;
+  --color-tag-design-ink: #320c01;
+
+  /* Portfolio ("Line Template (Web)", node 147:14) */
+  --color-panel: #fefefe;
+  --color-panel-edge: #ebebeb;
+  --color-panel-ring: rgba(115, 115, 115, 0.1);
+  --color-stat: #767676;
+  --color-stat-dim: #bebebe;
+  --color-loss: #f80000;
+  --color-loss-tint: rgba(255, 174, 174, 0.4);
+  --color-gain: #0a9c4b;
+  --color-gain-tint: rgba(163, 230, 190, 0.4);
+  --color-insight: #fdedfe;
+  --color-insight-ink: #5e0c61;
+  --color-insight-edge: #710475;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* Not `height`: once the viewport is shorter than the frame's floor, the app
+   has to be allowed to outgrow it so the page itself scrolls. */
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #ffffff;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The reading pane sits inside a device mockup, where a native scrollbar would
+   cut across the bezel. */
+.scroll-hidden {
+  scrollbar-width: none;
+}
+.scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* Layered outer + inner shadows from the Figma "Listen" pill. */
+.shadow-raised {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 4px 4px rgba(0, 0, 0, 0.1),
+    1px 8px 5px rgba(0, 0, 0, 0.06),
+    2px 14px 6px rgba(0, 0, 0, 0.02),
+    inset 1px 2px 2px rgba(122, 122, 122, 0.3),
+    inset 0 -2px 4px rgba(174, 174, 174, 0.25);
+}
+
+/* Layered drop shadows from the Figma floating action button. */
+.shadow-fab {
+  box-shadow:
+    0 1px 3px rgba(103, 97, 76, 0.16),
+    0 5px 5px rgba(103, 97, 76, 0.14),
+    0 11px 7px rgba(103, 97, 76, 0.08),
+    0 20px 8px rgba(103, 97, 76, 0.02);
+}
+
+/* Portfolio card — four stacked 1px layers that barely register on their own;
+   together they read as the sheet sitting a hair off the background. */
+.shadow-panel {
+  box-shadow:
+    0 4px 1px rgba(219, 218, 204, 0),
+    0 3px 1px rgba(219, 218, 204, 0.01),
+    0 2px 1px rgba(219, 218, 204, 0.03),
+    0 1px 1px rgba(219, 218, 204, 0.05);
+}
+
+/* The "Portfolio Insight" button. A `drop-shadow` filter, not `box-shadow`: it
+   follows the border's rounded outline, so the 3px lip under the key keeps the
+   corner radius instead of squaring off behind it. The key's three states now
+   live in `KEY` in Portfolio.tsx, since the lip's height animates with the cap's
+   offset — see the comment there. */
+
+/* Figma trims the text box to the cap height and the alphabetic baseline, so
+   labels centre on their letterforms rather than on the font's line box. Applied
+   only where the design sets it: the range tabs, the change badge, the key. */
+.trim-cap {
+  text-box: trim-both cap alphabetic;
+}
+
+.shadow-avatar {
+  box-shadow:
+    0 0 1px rgba(95, 100, 109, 0.19),
+    0 1px 1px rgba(95, 100, 109, 0.06);
+}
+
+/* Holdings table row emphasis — a light tint of the row's own ticker color
+   (set per-row via --row-hatch-color) in moving diagonal strokes, rather than
+   a flat grey fill. Triggers on a direct hover and on `data-active` (the pie
+   chart driving the same row from its own hover). One period (9px) per
+   step, so the position loop is seamless. */
+@keyframes row-hatch-shift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 9px 9px;
+  }
+}
+.row-hatch:hover,
+.row-hatch[data-active='true'] {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--row-hatch-color) 0px,
+    var(--row-hatch-color) 3px,
+    transparent 3px,
+    transparent 9px
+  );
+  animation: row-hatch-shift 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

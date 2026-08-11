@@ -1,0 +1,57 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Secrets & local machine state — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.netrc
+.claude/settings.local.json
+.claude/settings.*.local.json
+
+# Embedded git repo — not a submodule, would commit as a broken gitlink
+PlayComponents/
+
+# Raw Figma export dump, duplicated under src/assets/
+# Leading slash is required: git runs case-insensitively on macOS, so an
+# unanchored "Assets/" would also match src/assets/ and drop every app image.
+/Assets/
+
+# Internal planning notes — kept local, not published
+/plans/
+
+# AI agent tooling — local workflow, not part of the app.
+# .agents/ and .claude/skills/ vendor third-party skills from emilkowalski/skills;
+# publishing them would republish someone else's work. They restore from
+# skills-lock.json, so nothing is lost by keeping them out.
+/.agents/
+/.claude/
+/opencode.json
+/skills-lock.json
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
