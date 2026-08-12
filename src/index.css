@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -96,6 +97,10 @@
   --font-body: 'Pretendard Std', system-ui, sans-serif;
   /* The Portfolio sheet is set in this end to end, all of it Semibold. */
   --font-figure: 'Open Runde', system-ui, sans-serif;
+  /* Plain Inter, not the Inter Display cut the Membership sheet uses — the Move
+     design (node 236:3) specifies `Inter` for its control pill and panel
+     labels, and at 24px the two optical sizes are visibly different. */
+  --font-ui: 'Inter Variable', system-ui, sans-serif;
 
   /* House design tokens. Mirror any animated value in src/lib/motion.ts so the
      CSS and JS halves never drift. */
@@ -179,11 +184,24 @@
   --color-insight: #fdedfe;
   --color-insight-ink: #5e0c61;
   --color-insight-edge: #710475;
+
+  /* Move ("Line Template (Mobile)", node 236:3) */
+  --color-tray: #f7f7f7; /* placeholder panels, and the ticket's darken layer */
+  --color-chip: #e3e3e3; /* meta pills and the connectors between them */
+  --color-edge: #eeeeee; /* device outline and home indicator */
+  /* The featured panel is smoked glass over the backdrop rather than a solid
+     surface — paired with backdrop-blur-[20px] wherever it is used. */
+  --color-scrim: rgba(40, 39, 39, 0.6);
 }
 
 html,
 body {
   height: 100%;
+  /* A viewport-pinned playground has nothing to scroll, but the page still
+     rubber-bands past its edges on macOS and iOS — which reads as the whole
+     layout sliding up or down under the gesture. This stops the bounce without
+     touching real scrolling on the playgrounds that do overflow. */
+  overscroll-behavior: none;
 }
 
 /* min-height, not height: playgrounds other than the device frame are free to

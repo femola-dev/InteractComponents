@@ -3,6 +3,7 @@ import { ArticleReader } from './ArticleReader'
 import { NotificationStack } from './NotificationStack'
 import { Portfolio } from './Portfolio'
 import { MembershipDashboard } from './MembershipDashboard'
+import { Move } from './Move'
 
 export type Playground = {
   /** Also the URL hash: `#/article-reader`. Keep it kebab-case and stable. */
@@ -21,6 +22,7 @@ export const playgrounds: Playground[] = [
   { id: 'notification-stack', label: 'Notifications', Component: NotificationStack },
   { id: 'portfolio', label: 'Portfolio', Component: Portfolio },
   { id: 'membership-dashboard', label: 'Membership', Component: MembershipDashboard },
+  { id: 'move', label: 'Move', Component: Move },
 ]
 
 export const defaultPlaygroundId = playgrounds[0].id
