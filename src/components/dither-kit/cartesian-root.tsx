@@ -55,6 +55,17 @@ export type CartesianChartProps<TData extends Row> = {
   /** Recolours the dither body past the scrub point in this colour, leaving the
    *  series line on its own. Omit for a single-colour fill. */
   trailColor?: DitherColor | null
+  /**
+   * Which part of the plot box answers the pointer.
+   *
+   * `"plot"` (default) is the whole rectangle. `"under-series"` restricts it to
+   * the region *below* the series — above the line the chart behaves as though
+   * the pointer were outside it entirely: no crosshair, no scrub, no hover
+   * lift. For a chart whose fill is the subject, that empty upper wedge is not
+   * really part of the chart, and treating it as live means the curve twitches
+   * when the pointer is only passing over the sheet above it.
+   */
+  hoverArea?: "plot" | "under-series"
   /** Fires with the scrubbed index as the pointer moves (null on leave). */
   onHoverChange?: (index: number | null) => void
   defaultSelectedDataKey?: string | null
@@ -94,6 +105,7 @@ export function CartesianRoot<TData extends Row>({
   bloom = "off",
   bloomOnHover = false,
   trailColor = null,
+  hoverArea = "plot",
   onHoverChange,
   defaultSelectedDataKey = null,
   onSelectionChange,
@@ -134,11 +146,73 @@ export function CartesianRoot<TData extends Row>({
     else svgChildren.push(child)
   })
 
-  const onMove = (clientX: number) => {
+  const underSeriesOnly = hoverArea === "under-series"
+
+  /**
+   * Topmost series pixel at a plot-relative x, interpolated between the two
+   * rows the pointer sits between.
+   *
+   * Interpolated rather than read off the nearest row: the nearest row's value
+   * is a step function, so on a steep segment the boundary would sit up to half
+   * a category away from the drawn line and the chart would wake up above it.
+   *
+   * `bands` holds `[y0, y1]` per row in *value* space and the topmost series is
+   * the smallest pixel, which is why this maps through `ctx.y` before taking a
+   * minimum — the same walk `tooltipTop` does in chart-context.
+   */
+  const seriesTopAt = (px: number): number | null => {
+    const n = ctx.dataLength
+    if (n === 0) return null
+
+    const topOf = (i: number) => {
+      let top = Number.POSITIVE_INFINITY
+      for (const key of ctx.configKeys) {
+        const band = ctx.bands[key]?.[i]
+        if (band) top = Math.min(top, ctx.y(band[1]))
+      }
+      return Number.isFinite(top) ? top : null
+    }
+
+    if (n === 1) return topOf(0)
+
+    const first = ctx.xCenter(0)
+    const step = ctx.xCenter(1) - first
+    if (step <= 0) return topOf(0)
+
+    const t = (px - first) / step
+    const i = Math.max(0, Math.min(n - 2, Math.floor(t)))
+    const a = topOf(i)
+    const b = topOf(i + 1)
+    if (a == null || b == null) return a ?? b
+
+    const f = Math.max(0, Math.min(1, t - i))
+    return a + (b - a) * f
+  }
+
+  /** Leave the chart's interaction state as though the pointer were outside. */
+  const clearHover = () => {
+    ctx.setMouseInChart(false)
+    ctx.setHoverIndex(null)
+    onHoverChange?.(null)
+  }
+
+  const onMove = (clientX: number, clientY: number) => {
     const el = ref.current
     if (!el) return
     const rect = el.getBoundingClientRect()
     const px = clientX - rect.left - margins.left
+
+    if (underSeriesOnly) {
+      const top = seriesTopAt(px)
+      // Strictly above the line: the pointer is over the plot box but not over
+      // the chart. Bail before touching any interaction state.
+      if (top != null && clientY - rect.top - margins.top < top) {
+        if (ctx.isMouseInChart || ctx.hoverIndex != null) clearHover()
+        return
+      }
+      ctx.setMouseInChart(true)
+    }
+
     const index = ctx.indexAtX(px)
     ctx.setHoverIndex(index)
     ctx.setCursorX(clientX - rect.left)
@@ -151,13 +225,16 @@ export function CartesianRoot<TData extends Row>({
         <div
           ref={ref}
           className={cn("relative h-full w-full", className)}
-          onPointerEnter={() => ctx.setMouseInChart(true)}
-          onPointerMove={interactive ? (e) => onMove(e.clientX) : undefined}
-          onPointerLeave={() => {
-            ctx.setMouseInChart(false)
-            ctx.setHoverIndex(null)
-            onHoverChange?.(null)
-          }}
+          // Under `under-series` the lift is earned by the first accepted move,
+          // not by crossing the box — entering over the empty wedge above the
+          // curve must not light the fill up.
+          onPointerEnter={
+            underSeriesOnly ? undefined : () => ctx.setMouseInChart(true)
+          }
+          onPointerMove={
+            interactive ? (e) => onMove(e.clientX, e.clientY) : undefined
+          }
+          onPointerLeave={clearHover}
         >
           {ctx.ready && backChildren.length > 0 && (
             <svg

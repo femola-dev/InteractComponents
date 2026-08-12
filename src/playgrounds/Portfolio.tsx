@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { DeviceFrame } from '../components/DeviceFrame'
 import { ProgressiveBlur } from '../components/ProgressiveBlur'
@@ -8,6 +8,7 @@ import { PortfolioInsights } from '../components/PortfolioInsights'
 import { PortfolioSheet } from '../components/PortfolioSheet'
 import { CURRENCIES, type CurrencyId } from '../lib/currencies'
 import { useRise } from '../components/rise'
+import { useSquircle } from '../components/useSquircle'
 import { springResponsive, transitionFast } from '../lib/motion'
 import { useSweep } from '../components/sweep-context'
 import { AreaChart } from '../components/dither-kit/area-chart'
@@ -61,6 +62,10 @@ const KEY = {
   hover: { y: 1, filter: 'drop-shadow(0 2px 0 #5e0c61)' },
   press: { y: 3, filter: 'drop-shadow(0 0px 0 #5e0c61)' },
 } as const
+
+/** Node 153:2612's corners: a 12px radius at 60% smoothing. */
+const KEY_RADIUS = 12
+const KEY_SMOOTHING = 0.6
 
 /**
  * The 3M window is drawn to the silhouette in the Figma plot — steep rise, a
@@ -132,6 +137,10 @@ export function Portfolio() {
   const sweep = useSweep()
   const reducedMotion = useReducedMotion()
 
+  // The Insight key's outline. `inset` is half of the 2px stroke, so the
+  // stroke's outer edge lands on the button's own edge — Figma's inside stroke.
+  const key = useSquircle({ radius: KEY_RADIUS, smoothing: KEY_SMOOTHING, inset: 1 })
+
   // Memoised on `range`, and that matters: the chart derives its "replay the
   // draw-on animation" signal from the identity of `data`, so a fresh slice on
   // every render would restart the entrance on every mousemove. Scrubbing has to
@@ -154,28 +163,11 @@ export function Portfolio() {
   const baseAmount = (hovered ?? data.at(-1)!).value * 1000
   const amount = baseAmount * selectedCurrency.rate
 
-  // Only forward hover when the pointer is below the trend line, not above it.
-  const chartRef = useRef<HTMLDivElement>(null)
-  const mouseY = useRef(0)
-
-  const handleChartHover = useCallback(
-    (index: number | null) => {
-      if (index == null || !chartRef.current) {
-        setHoverIndex(null)
-        return
-      }
-      const rect = chartRef.current.getBoundingClientRect()
-      const { top: mt, bottom: mb } = CHART_MARGINS
-      const h = rect.height - mt - mb
-      const vals = data.map((p) => p.value)
-      const min = Math.min(...vals)
-      const max = Math.max(...vals)
-      const pointY =
-        mt + ((max - data[index].value) / Math.max(max - min, 1)) * h
-      setHoverIndex(mouseY.current > pointY ? index : null)
-    },
-    [data],
-  )
+  // Hover is gated to the region under the trend line, but by the chart itself
+  // (`hoverArea="under-series"`) rather than here. It has to be: the boundary is
+  // the drawn curve, and only the chart knows the scale that drew it — its y
+  // domain runs from zero and is `nice()`d, so a threshold derived out here from
+  // the data's own min/max describes a line that isn't on screen.
 
   // 3M and 1Y go neon green; 1M and 6M stay pink.
   const chartConfig = useMemo<ChartConfig>(
@@ -308,17 +300,6 @@ export function Portfolio() {
               scrubbing leaves the curve alone. */}
           <motion.div
             {...rise(0.24)}
-            ref={chartRef}
-            onPointerMove={(e) => {
-              if (chartRef.current) {
-                mouseY.current =
-                  e.clientY - chartRef.current.getBoundingClientRect().top
-              }
-            }}
-            onPointerLeave={() => {
-              setHoverIndex(null)
-              mouseY.current = 0
-            }}
             className="relative z-0 mt-[68px] h-[clamp(180px,30vh,348px)] w-full overflow-hidden rounded-t-[32px]"
           >
             <AreaChart
@@ -330,7 +311,11 @@ export function Portfolio() {
               trailColor="mute"
               margins={CHART_MARGINS}
               className="size-full"
-              onHoverChange={handleChartHover}
+              // The empty wedge above the curve is sheet, not chart: the
+              // pointer crossing it on its way to the Insight key below must
+              // leave the plot alone. See the prop's note in cartesian-root.
+              hoverArea="under-series"
+              onHoverChange={setHoverIndex}
             >
               {/* `hatched` rather than `gradient`: the Figma plot fills its
                   region with diagonal hatching, and a solid dither fill swamps
@@ -380,27 +365,22 @@ export function Portfolio() {
               // underneath the band at its midpoint, same as ArticleReader's
               // article/summary toggle.
               onClick={() => sweep(() => setView('insights'), { direction: 'btt' })}
-              // Node 153:2612 — 156×42, content row 16px at 16/13 inset.
-              // `z-20` puts the key above the blur where the two overlap, as the
-              // design layers them. Padding is 14/11 rather than the node's
-              // 16/13 because Figma draws the 2px stroke *inside* the 42px box
-              // and CSS adds it on top: 2+14+16+14+2 = 48 wide of chrome, and
-              // 2+11+16+11+2 = 42 tall.
+              ref={key.ref}
+              // Node 153:2612 — 156×42, content row 16px at 16/13 inset, and a
+              // 12px radius at 60% corner smoothing. `z-20` puts the key above
+              // the blur where the two overlap, as the design layers them.
               //
-              // The node's 60% corner smoothing is `corner-shape: squircle`.
-              // Figma's percentage and the CSS parameter are different
-              // parameterisations of the same Lamé curve: CSS takes log2 of the
-              // exponent, so `round` is superellipse(1) — an exponent of 2, a
-              // plain circular arc — and `squircle` is superellipse(2), an
-              // exponent of 4. Figma's 60% is its iOS preset, and the classic
-              // exponent-4 squircle is what that preset draws.
+              // The fill and the 2px stroke are the SVG below, not `bg-*` and
+              // `border-2`, because no CSS property draws Figma's smoothing
+              // (see src/lib/squircle.ts). That makes the padding the node's
+              // own 16/13 rather than the 14/11 a CSS border needed — the
+              // stroke is inside the box now, as it is in Figma, so it no
+              // longer has to be paid for out of the padding. Same 42px box:
+              // 13 + 16 + 13.
               //
-              // Both halves of the key follow it for free: the 2px stroke is
-              // painted on the corner shape, and the lip is a `drop-shadow`
-              // filter, which traces rendered alpha rather than the border box.
-              // Browsers without `corner-shape` fall back to the plain 12px
-              // radius — the design as it shipped before this line.
-              className="bg-insight text-insight-ink border-insight-ink absolute -bottom-[27px] left-1/2 z-20 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-[12px] [corner-shape:squircle] border-2 px-[14px] py-[11px] text-[14px] leading-[22px] tracking-[-0.28px] outline-none focus-visible:ring-2 focus-visible:ring-insight-edge/40"
+              // `rounded-[12px]` stays for the focus ring, which is a
+              // box-shadow on the border box and can't follow the path.
+              className="text-insight-ink absolute -bottom-[27px] left-1/2 z-20 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-[12px] px-4 py-[13px] text-[14px] leading-[22px] tracking-[-0.28px] outline-none focus-visible:ring-2 focus-visible:ring-insight-edge/40"
               // `initial={false}`: the sheet's own entrance already brings the
               // key in — this would otherwise animate the lip from nothing.
               initial={false}
@@ -410,9 +390,31 @@ export function Portfolio() {
               whileTap={KEY.press}
               transition={reducedMotion ? { duration: 0 } : transitionFast}
             >
+              {/* The key's face. Absolute over the whole box, so it is the
+                  first thing painted and the label sits on top of it — and so
+                  the `drop-shadow` lip, which traces rendered alpha rather
+                  than the border box, picks up the smoothed corners for free.
+                  `overflow-visible` because the stroke is centred on a path
+                  inset by half its width, not clipped to the viewBox. */}
+              {key.d && (
+                <svg
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 size-full overflow-visible"
+                >
+                  <path
+                    d={key.d}
+                    transform={`translate(${key.inset} ${key.inset})`}
+                    fill="var(--color-insight)"
+                    stroke="var(--color-insight-ink)"
+                    strokeWidth={key.inset * 2}
+                  />
+                </svg>
+              )}
+
               {/* 16px tall — the icon sets the row's height, since the trimmed
-                  label is only its 10px cap height. No line box of its own. */}
-              <span className="flex items-center gap-1">
+                  label is only its 10px cap height. No line box of its own.
+                  `relative` lifts it clear of the face painted above. */}
+              <span className="relative flex items-center gap-1">
                 <img src={iconScriptAi} alt="" aria-hidden="true" className="size-4" />
                 <span className="trim-cap">Portfolio Insight</span>
               </span>
