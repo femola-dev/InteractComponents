@@ -81,6 +81,26 @@ export function PencilAiIcon({ sparkleActive }: { sparkleActive: boolean }) {
   )
 }
 
+/**
+ * Figma node 223:3205 — the floating action's "back to article" state.
+ *
+ * The path is the exported asset verbatim, so the viewBox is the export's own
+ * 48×48 circle (`rect x=8 y=2`) rather than a 0-origin box: that keeps the
+ * glyph's exact placement inside the button without rewriting a coordinate.
+ * The circle and its four drop shadows are left to the button, which already
+ * paints them (`.shadow-fab`).
+ */
+export function BackToArticleIcon() {
+  return (
+    <svg width="48" height="48" viewBox="8 2 48 48" fill="none" aria-hidden="true">
+      <path
+        d="M32.001 17.4659V20.7591C35.9885 20.8535 38.7585 21.7284 40.4885 23.8247C42.2205 25.9235 42.751 29.0692 42.751 33.2504C42.751 33.5983 42.5118 33.9005 42.1733 33.9804C41.8348 34.0603 41.4857 33.897 41.3302 33.5859L41.3067 33.539C40.5681 32.0615 40.0971 31.1194 38.9558 30.446C37.7892 29.7577 35.8295 29.3063 32.001 29.2553V32.535C32.001 33.8434 30.4429 34.5246 29.4824 33.6362L21.3369 26.1016C20.695 25.5078 20.695 24.4931 21.3369 23.8993L29.4824 16.3647C30.4429 15.4763 32.001 16.1575 32.001 17.4659Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
   return (
     <svg

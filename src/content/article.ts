@@ -4,11 +4,19 @@ import avatar3 from '../assets/images/avatar-3.png'
 
 export type TagName = 'AI' | 'Tech' | 'Design'
 
-export type Block =
+export type Block = {
+  /**
+   * Space above the block. Figma stacks the body as two runs: 24px between
+   * blocks inside a run (and between the runs themselves), 40px inside the
+   * second run — the one that opens with the pull quote.
+   */
+  spaceAbove?: number
+} & (
   | { kind: 'p'; text: string }
   | { kind: 'h2'; text: string }
   | { kind: 'quote'; text: string }
-  | { kind: 'list'; intro: string; items: string[] }
+  | { kind: 'list'; items: string[] }
+)
 
 export type Section = {
   id: string
@@ -21,6 +29,7 @@ export type Section = {
 export const article = {
   title: 'The Historical Age of AI and Human Collaboration',
   byline: 'by John, Emily, and Ron.',
+  readingTime: '7 mins read',
   published: 'Published 3 days',
   avatars: [
     { src: avatar1, alt: 'John' },
@@ -55,7 +64,7 @@ export const article = {
     {
       id: 'introduction',
       label: 'Introduction',
-      minimapLines: 5,
+      minimapLines: 6,
       blocks: [
         {
           kind: 'p',
@@ -65,33 +74,56 @@ export const article = {
           kind: 'p',
           text: 'AI excels at processing information quickly, identifying patterns, and completing repeatable tasks at scale. A healthcare system, for example, can use AI to review medical images and flag possible concerns for a doctor. The AI does not replace the doctor’s judgment, empathy, or responsibility. Instead, it helps the doctor focus attention where it may be needed most. This is the core of human-AI collaboration: technology handles speed and scale, while people provide context, values, creativity, and care.\nIn the workplace, this partnership is reshaping roles rather than simply eliminating them. Designers can use AI to explore early concepts, writers can use it to organize research, and analysts can use it to identify trends that would take hours to find manually. However, humans still need to ask the right questions, check facts, understand users, and make ethical decisions. AI can generate many possible answers, but it cannot independently decide what is fair, meaningful, or appropriate for a specific community.',
         },
-        {
-          kind: 'p',
-          text: 'Collaboration with AI also requires new skills. People must learn how to give clear instructions, evaluate outputs critically, protect sensitive information, and recognize when AI may be wrong or biased. AI systems learn from human-created data, which can contain gaps and unfair assumptions. For this reason, responsible use requires human oversight at every important stage, especially in areas such as hiring, finance, education, law, and healthcare.\nThe future will belong to people who combine technical confidence with distinctly human strengths. Curiosity, communication, empathy, judgment, and imagination will become even more valuable as AI becomes more common. Rather than competing with AI in tasks it performs best, people can use it as a collaborative partner that expands their capacity to learn, create, and contribute.',
-        },
       ],
     },
     {
       id: 'workplace',
       label: 'Collaboration in the Workplace',
-      minimapLines: 14,
+      minimapLines: 5,
       blocks: [
         { kind: 'h2', text: 'Collaboration in the Workplace' },
+        // Figma runs these three together in one text node, with an empty
+        // paragraph before the last — hence the double break.
         {
           kind: 'p',
-          text: 'Human-AI collaboration is already transforming many professions. Rather than waiting for a future in which every workplace is fully automated, organizations are beginning to integrate AI into daily workflows.',
+          text: 'Collaboration with AI also requires new skills. People must learn how to give clear instructions, evaluate outputs critically, protect sensitive information, and recognize when AI may be wrong or biased. AI systems learn from human-created data, which can contain gaps and unfair assumptions. For this reason, responsible use requires human oversight at every important stage, especially in areas such as hiring, finance, education, law, and healthcare.\nThe future will belong to people who combine technical confidence with distinctly human strengths. Curiosity, communication, empathy, judgment, and imagination will become even more valuable as AI becomes more common. Rather than competing with AI in tasks it performs best, people can use it as a collaborative partner that expands their capacity to learn, create, and contribute.\n\nHuman-AI collaboration is already transforming many professions. Rather than waiting for a future in which every workplace is fully automated, organizations are beginning to integrate AI into daily workflows.',
         },
+      ],
+    },
+    {
+      id: 'practice',
+      label: 'AI in Practice',
+      minimapLines: 5,
+      blocks: [
+        // The quote is set off by an equal 48px on both sides, rather than
+        // Figma's uneven 24 above / 40 below.
         {
           kind: 'quote',
+          spaceAbove: 48,
           text: '“The growth of AI makes lifelong learning increasingly important. Workers, students, and leaders will need opportunities to build both technical and human-centered skills.”',
         },
         {
           kind: 'p',
+          spaceAbove: 48,
           text: 'A writer may use AI to generate an initial outline, summarize research, or suggest alternative wording. The writer must still verify facts, develop a clear point of view, protect confidential information, and ensure the final work reflects the intended audience and purpose.\nA product designer may use AI to explore interface ideas, draft user flows, generate placeholder content, or speed up early-stage research synthesis. However, successful product design still depends on speaking with users, identifying unmet needs, testing assumptions, considering accessibility, and making thoughtful trade-offs. AI can accelerate the process, but it cannot replace an understanding of real people and their experiences.',
+        },
+      ],
+    },
+    {
+      id: 'responsible',
+      label: 'Responsible AI Use',
+      minimapLines: 3,
+      blocks: [
+        {
+          kind: 'h2',
+          spaceAbove: 40,
+          text: 'Responsible AI use includes several practical habits:',
         },
         {
           kind: 'list',
-          intro: 'Responsible AI use includes several practical habits:',
+          // Figma has 40 here, but the heading reads as a lead-in to the
+          // bullets, so it sits a step closer at the default 24.
+          spaceAbove: 24,
           items: [
             'Clearly define the problem before asking AI for help.',
             'Provide relevant context while avoiding sensitive or confidential information.',

@@ -15,10 +15,20 @@ export function ArticleHeader() {
         {article.title}
       </motion.h1>
 
-      <motion.div {...rise(0.24)} className="flex items-center gap-2">
-        <AuthorAvatars />
-        <p className="text-[12px] leading-5 tracking-[-0.108px] text-muted">
-          {article.byline}
+      {/* Figma node 70:1505 — byline hugs the left, reading time the right. */}
+      <motion.div
+        {...rise(0.24)}
+        className="flex items-center justify-between gap-3"
+      >
+        <div className="flex items-center gap-2">
+          <AuthorAvatars />
+          <p className="text-[12px] leading-5 tracking-[-0.108px] text-subtle">
+            {article.byline}
+          </p>
+        </div>
+
+        <p className="shrink-0 text-right text-[12px] leading-5 tracking-[-0.108px] text-subtle">
+          {article.readingTime}
         </p>
       </motion.div>
     </header>

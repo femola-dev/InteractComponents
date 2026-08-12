@@ -111,10 +111,6 @@
   --spacing-read-bottom: clamp(64px, 14vh, 112px); /* Figma 112 */
   --spacing-read-gap: clamp(20px, 5vh, 40px); /* Figma 40 */
 
-  /* Below this the frame stops shrinking and the page scrolls instead, so the
-     article never collapses to nothing. */
-  --spacing-frame-floor: 560px;
-
   /* Corner radius */
   --radius-sm: 6px;
   --radius-md: 12px;
@@ -144,11 +140,20 @@
   --color-hairline: #eaeaea;
   --color-bezel: #cccccc;
   --color-ink: #000000;
-  --color-muted: #8d8d8d;
+  /* Secondary text — bylines, kickers, the outline's section labels. Not named
+     `muted`: shadcn's `@theme inline` block below also defines `--color-muted`
+     (its near-white surface, used by the button's hover fill), and being later
+     in the file it wins. A house token by that name silently resolves to white
+     on white. */
+  --color-subtle: #8d8d8d;
   --color-outline: #555555;
   --color-minimap: #888888;
   --color-minimap-idle: #eaeaea;
   --color-rule: #e0e0e0;
+
+  /* Read-along highlight. Light enough that black body text keeps its contrast
+     while the mark travels under it. */
+  --color-read-mark: #cfe6ff;
 
   --color-quote: #ecfdf5;
   --color-quote-edge: #d5eee2;
@@ -181,8 +186,8 @@ body {
   height: 100%;
 }
 
-/* Not `height`: once the viewport is shorter than the frame's floor, the app
-   has to be allowed to outgrow it so the page itself scrolls. */
+/* min-height, not height: playgrounds other than the device frame are free to
+   run taller than the viewport and let the page scroll. */
 #root {
   min-height: 100%;
 }

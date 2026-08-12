@@ -319,7 +319,7 @@ export function Portfolio() {
               setHoverIndex(null)
               mouseY.current = 0
             }}
-            className="relative z-0 mt-1 h-[clamp(180px,30vh,348px)] w-full overflow-hidden rounded-t-[32px]"
+            className="relative z-0 mt-[68px] h-[clamp(180px,30vh,348px)] w-full overflow-hidden rounded-t-[32px]"
           >
             <AreaChart
               data={data}
@@ -386,7 +386,21 @@ export function Portfolio() {
               // 16/13 because Figma draws the 2px stroke *inside* the 42px box
               // and CSS adds it on top: 2+14+16+14+2 = 48 wide of chrome, and
               // 2+11+16+11+2 = 42 tall.
-              className="bg-insight text-insight-ink border-insight-ink absolute -bottom-[27px] left-1/2 z-20 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-[12px] border-2 px-[14px] py-[11px] text-[14px] leading-[22px] tracking-[-0.28px] outline-none focus-visible:ring-2 focus-visible:ring-insight-edge/40"
+              //
+              // The node's 60% corner smoothing is `corner-shape: squircle`.
+              // Figma's percentage and the CSS parameter are different
+              // parameterisations of the same Lamé curve: CSS takes log2 of the
+              // exponent, so `round` is superellipse(1) — an exponent of 2, a
+              // plain circular arc — and `squircle` is superellipse(2), an
+              // exponent of 4. Figma's 60% is its iOS preset, and the classic
+              // exponent-4 squircle is what that preset draws.
+              //
+              // Both halves of the key follow it for free: the 2px stroke is
+              // painted on the corner shape, and the lip is a `drop-shadow`
+              // filter, which traces rendered alpha rather than the border box.
+              // Browsers without `corner-shape` fall back to the plain 12px
+              // radius — the design as it shipped before this line.
+              className="bg-insight text-insight-ink border-insight-ink absolute -bottom-[27px] left-1/2 z-20 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-[12px] [corner-shape:squircle] border-2 px-[14px] py-[11px] text-[14px] leading-[22px] tracking-[-0.28px] outline-none focus-visible:ring-2 focus-visible:ring-insight-edge/40"
               // `initial={false}`: the sheet's own entrance already brings the
               // key in — this would otherwise animate the lip from nothing.
               initial={false}

@@ -71,7 +71,7 @@ export function NotificationStack() {
             <h1 className="font-display text-[34px] leading-[1.1] text-ink">
               Notification Stack
             </h1>
-            <p className="max-w-[38ch] text-[13px] leading-5 text-muted">
+            <p className="max-w-[38ch] text-[13px] leading-5 text-subtle">
               Hover or tap the stack to fan it out. Drag a card sideways to
               dismiss it.
             </p>
@@ -116,7 +116,7 @@ export function NotificationStack() {
                     }
                   }}
                 >
-                  <span className="text-[10px] tracking-[0.08em] text-muted uppercase">
+                  <span className="text-[10px] tracking-[0.08em] text-subtle uppercase">
                     {item.app}
                   </span>
                   <span className="text-[13px] leading-4 font-medium text-ink">
@@ -134,7 +134,7 @@ export function NotificationStack() {
                 initial={{ opacity: 0, filter: 'blur(2px)' }}
                 animate={{ opacity: 1, filter: 'blur(0px)' }}
                 transition={transitionFast}
-                className="absolute inset-x-0 bottom-0 flex h-[76px] items-center justify-center rounded-[18px] border border-dashed border-hairline text-[12px] text-muted"
+                className="absolute inset-x-0 bottom-0 flex h-[76px] items-center justify-center rounded-[18px] border border-dashed border-hairline text-[12px] text-subtle"
               >
                 All caught up
               </motion.p>
@@ -167,7 +167,7 @@ export function NotificationStack() {
           </motion.div>
 
           {items.length > MAX_VISIBLE && (
-            <span className="text-[11px] text-muted">
+            <span className="text-[11px] text-subtle">
               +{items.length - MAX_VISIBLE} more waiting
             </span>
           )}

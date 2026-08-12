@@ -6,7 +6,7 @@ import { EditSmallIcon } from './icons'
 export function PublishedMeta() {
   return (
     <motion.div
-      className="text-muted flex items-center gap-1"
+      className="text-subtle flex items-center gap-1"
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.9, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}

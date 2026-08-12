@@ -3,21 +3,26 @@ import { useRef, useState } from 'react'
 import { article } from '../content/article'
 
 /**
- * Figma "Frame 28" (node 78:2195): 19 strokes, 2px thick, 6px pitch, round caps.
- * The node stores path lengths; a round cap adds half the stroke width at each
- * end, so the visual width is path + 2 — that's what these are.
+ * Figma node 221:1579 draws 19 strokes at 2px thick, 6px pitch, round caps, at
+ * five different lengths. Every stroke now rests at one length instead, so the
+ * column reads as a single clean edge and *all* the variation comes from the
+ * cursor — the outline is flat until you touch it.
+ *
+ * The value is the Figma stroke's own length: it stores the path's end from
+ * x=25, and a round cap adds half the stroke width at each end, so the visual
+ * width is (end - 25) + 2.
  */
-const lineWidths = [
-  38.8, 46.4, 53.8, 46.4, 38.8, 34.1, 34.1, 34.1, 34.1, 34.1, 34.1, 34.1, 34.1,
-  34.1, 34.1, 34.1, 34.1, 34.1, 34.1,
-]
+const BASE_WIDTH = 14.12
+
+/** The column the label is laid out against. */
+const COLUMN = Math.ceil(BASE_WIDTH)
 
 const LINE_H = 2
 const GAP = 4
 const PITCH = LINE_H + GAP
 
 /** How far the stroke under the cursor reaches, and how fast that falls off. */
-const MAX_EXTEND = 18
+const MAX_EXTEND = 10
 const SIGMA = 12
 
 /** Each section owns a run of the minimap's strokes. */
@@ -25,9 +30,13 @@ const groups = (() => {
   let cursor = 0
   return article.sections.map((section) => {
     const offset = cursor
-    const widths = lineWidths.slice(cursor, cursor + section.minimapLines)
     cursor += section.minimapLines
-    return { id: section.id, label: section.label, widths, offset }
+    return {
+      id: section.id,
+      label: section.label,
+      count: section.minimapLines,
+      offset,
+    }
   })
 })()
 
@@ -90,14 +99,16 @@ export function OutlineMinimap({ activeSection, onSelect }: Props) {
             onPointerEnter={() => setHovered(group.id)}
             onFocus={() => setHovered(group.id)}
             onBlur={() => setHovered(null)}
-            className="flex w-[124px] cursor-pointer items-center gap-[6px] text-left"
+            // Wide enough to contain the label at its 110px cap (which starts
+            // at COLUMN + 6), so the text no longer spills past the button.
+            className="relative flex w-[137px] cursor-pointer items-center text-left"
           >
             <span
               aria-hidden="true"
-              className="flex w-[57px] shrink-0 flex-col"
-              style={{ gap: GAP }}
+              className="flex shrink-0 flex-col"
+              style={{ width: COLUMN, gap: GAP }}
             >
-              {group.widths.map((baseWidth, i) => {
+              {Array.from({ length: group.count }, (_, i) => {
                 const index = group.offset + i
                 return (
                   <motion.span
@@ -107,11 +118,11 @@ export function OutlineMinimap({ activeSection, onSelect }: Props) {
                     // `style` too would let React overwrite the animated value
                     // on every pointer-driven re-render.
                     style={{ height: LINE_H }}
-                    initial={{ opacity: 0, scaleX: 0.2, width: baseWidth }}
+                    initial={{ opacity: 0, scaleX: 0.2, width: BASE_WIDTH }}
                     animate={{
                       opacity: 1,
                       scaleX: 1,
-                      width: baseWidth + extensionAt(index, pointer),
+                      width: BASE_WIDTH + extensionAt(index, pointer),
                       backgroundColor: color,
                     }}
                     transition={{
@@ -134,10 +145,18 @@ export function OutlineMinimap({ activeSection, onSelect }: Props) {
               {showLabel && (
                 <motion.span
                   key={group.id}
-                  className="text-muted max-w-[84px] text-[8px] leading-4 tracking-[-0.072px] xl:max-w-none xl:whitespace-nowrap"
+                  // Absolute, so a label taller than its own run of strokes
+                  // (12px text wraps to 2–3 lines) can't push the groups below
+                  // it down — the stroke grid stays rigid and only the cursor
+                  // moves anything.
+                  // 110px is just wider than "Collaboration in", the longest
+                  // label's first half — enough to settle on two lines rather
+                  // than three, which `text-balance` then evens out.
+                  className="text-subtle absolute inset-y-0 flex max-w-[110px] items-center text-[12px] leading-4 tracking-[-0.108px] text-balance"
+                  style={{ left: COLUMN + 6 }}
                   initial={{ opacity: 0, x: -4 }}
                   // Clears the widest reach of the magnified strokes.
-                  animate={{ opacity: 1, x: isHovered ? 22 : 0 }}
+                  animate={{ opacity: 1, x: isHovered ? MAX_EXTEND + 4 : 0 }}
                   exit={{ opacity: 0, x: -4 }}
                   transition={{ duration: 0.2, ease: 'easeOut' }}
                 >

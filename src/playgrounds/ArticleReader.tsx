@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
 import { ActionsBar } from '../components/ActionsBar'
 import { AiSummary } from '../components/AiSummary'
 import { ArticleBody } from '../components/ArticleBody'
@@ -9,7 +10,9 @@ import { HatchBand } from '../components/HatchBand'
 import { OutlineMinimap } from '../components/OutlineMinimap'
 import { ProgressiveBlur } from '../components/ProgressiveBlur'
 import { PublishedMeta } from '../components/PublishedMeta'
+import { TOTAL_WORDS } from '../components/reading'
 import { useActiveSection } from '../components/useActiveSection'
+import { useReadingCursor } from '../components/useReadingCursor'
 import { useSweep } from '../components/sweep-context'
 import { article } from '../content/article'
 
@@ -22,8 +25,32 @@ export function ArticleReader() {
   const sweep = useSweep()
 
   const activeSection = useActiveSection(scrollRef, article.sections[0].id)
+  const readingCursor = useReadingCursor(isPlaying, TOTAL_WORDS)
+
+  // Follow the highlight, but only once it leaves the comfortable middle band —
+  // scrolling on every word would yank the page out from under the reader.
+  useEffect(() => {
+    const container = scrollRef.current
+    if (readingCursor === null || !container) return
+
+    const mark = container.querySelector<HTMLElement>('[data-reading-active]')
+    if (!mark) return
+
+    const frame = container.getBoundingClientRect()
+    const box = mark.getBoundingClientRect()
+    if (box.top >= frame.top + frame.height * 0.25 && box.bottom <= frame.top + frame.height * 0.7) {
+      return
+    }
+
+    container.scrollTo({
+      top: container.scrollTop + (box.top - frame.top) - frame.height * 0.35,
+      behavior: 'smooth',
+    })
+  }, [readingCursor])
 
   const toggleView = () => {
+    // Narration belongs to the article; the summary is not what it was reading.
+    setIsPlaying(false)
     sweep(
       () => {
         setView((v) => (v === 'article' ? 'summary' : 'article'))
@@ -35,6 +62,7 @@ export function ArticleReader() {
   }
 
   const fabLabel = view === 'article' ? 'Summarize Article' : 'Back to Article'
+  const fabMode = view === 'article' ? 'summarize' : 'back'
 
   const scrollToSection = (id: string) => {
     const container = scrollRef.current
@@ -51,12 +79,28 @@ export function ArticleReader() {
 
   return (
     <DeviceFrame>
-      {/* Left rail — document outline */}
-      <aside className="border-hairline relative hidden shrink-0 border-r pt-[132px] pl-[25px] lg:block lg:w-[180px] xl:w-[264px]">
-        <OutlineMinimap
-          activeSection={activeSection}
-          onSelect={scrollToSection}
-        />
+      {/* Left rail — document outline. The Figma places the outline's first
+          stroke at 24,131 from the screen's outer edge; the rail sits inside the
+          screen's 1.5px border, so both offsets lose that 1.5. */}
+      <aside className="border-hairline relative hidden shrink-0 border-r pt-[129.5px] pl-[22.5px] lg:block lg:w-[180px] xl:w-[264px]">
+        {/* The outline maps the article's own sections, so it has nothing to
+            point at on the summary — it leaves and the rail stays. */}
+        <AnimatePresence>
+          {view === 'article' && (
+            <motion.div
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <OutlineMinimap
+                activeSection={activeSection}
+                onSelect={scrollToSection}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="absolute bottom-[35px] left-[25px]">
           <PublishedMeta />
         </div>
@@ -81,7 +125,7 @@ export function ArticleReader() {
                     onToggleListen={() => setIsPlaying((p) => !p)}
                   />
                 </div>
-                <ArticleBody />
+                <ArticleBody cursor={readingCursor} />
               </>
             ) : (
               <AiSummary />
@@ -95,13 +139,13 @@ export function ArticleReader() {
       {/* Right rail — floating action */}
       <aside className="border-hairline relative hidden shrink-0 border-l lg:block lg:w-[180px] xl:w-[264px]">
         <div className="absolute right-6 bottom-5">
-          <AskAiFab label={fabLabel} onActivate={toggleView} />
+          <AskAiFab label={fabLabel} mode={fabMode} onActivate={toggleView} />
         </div>
       </aside>
 
       {/* Rails collapse on smaller screens, so the action floats over the content */}
       <div className="absolute right-5 bottom-6 z-20 lg:hidden">
-        <AskAiFab label={fabLabel} onActivate={toggleView} />
+        <AskAiFab label={fabLabel} mode={fabMode} onActivate={toggleView} />
       </div>
     </DeviceFrame>
   )

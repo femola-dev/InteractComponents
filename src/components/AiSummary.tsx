@@ -18,11 +18,11 @@ export function AiSummary() {
                 'linear-gradient(135deg, #69bff9 0%, #b96af3 34%, #e9685e 67%, #f2ac3e 100%)',
             }}
           />
-          <span className="text-[12px] leading-4 tracking-[-0.108px] text-muted">
+          <span className="text-[12px] leading-4 tracking-[-0.108px] text-subtle">
             {summary.kicker}
           </span>
-          <span className="text-[12px] leading-4 text-hairline">•</span>
-          <span className="text-[12px] leading-4 tracking-[-0.108px] text-muted">
+          <span className="text-[12px] leading-4 text-subtle">•</span>
+          <span className="text-[12px] leading-4 tracking-[-0.108px] text-subtle">
             {summary.readingTime}
           </span>
         </motion.div>
@@ -45,7 +45,7 @@ export function AiSummary() {
       <ol className="flex flex-col gap-6">
         {summary.points.map((point, i) => (
           <motion.li key={point.heading} {...rise(0.26 + i * 0.08)} className="flex gap-3">
-            <span className="mt-[3px] w-4 shrink-0 text-[12px] leading-6 tabular-nums text-muted">
+            <span className="mt-[3px] w-4 shrink-0 text-[12px] leading-6 tabular-nums text-subtle">
               {String(i + 1).padStart(2, '0')}
             </span>
             <div className="flex flex-col gap-1">
