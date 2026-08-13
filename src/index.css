@@ -185,10 +185,21 @@
   --color-insight-ink: #5e0c61;
   --color-insight-edge: #710475;
 
-  /* Move ("Line Template (Mobile)", node 236:3) */
-  --color-tray: #f7f7f7; /* placeholder panels, and the ticket's darken layer */
-  --color-chip: #e3e3e3; /* meta pills and the connectors between them */
-  --color-edge: #eeeeee; /* device outline and home indicator */
+  /* Move ("Line Template (Mobile)", node 236:3)
+     Warmed off the design's neutral greys. Every one of these was a pure grey
+     — #f7f7f7, #e3e3e3, #d9d9d9, #eee — which next to a colour-graded film
+     poster reads as absence rather than as a choice. Nudging them onto a warm
+     axis costs nothing in contrast and gives the coloured glyphs a ground that
+     belongs to the same world they do. */
+  --color-tray: #f7f4ef; /* placeholder panels, and the ticket's darken layer */
+  --color-chip: #e8e3da; /* meta pills and the connectors between them */
+  --color-key: #f2e6d2; /* the tray's Shuffle key — the one solid fill in it */
+  --color-edge: #ece7df; /* device outline and home indicator */
+  /* Copy on those surfaces. Warm near-black rather than #000, and a warm grey
+     for the year chip's resting label. Separate tokens and not a change to
+     `--color-ink`, which the article and Portfolio sheets share. */
+  --color-ink-soft: #241f1a;
+  --color-ink-faint: #7a7168;
   /* The featured panel is smoked glass over the backdrop rather than a solid
      surface — paired with backdrop-blur-[20px] wherever it is used. */
   --color-scrim: rgba(40, 39, 39, 0.6);

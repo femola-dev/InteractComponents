@@ -33,6 +33,20 @@ type Props = {
  *
  * svh, not dvh, so the frame doesn't resize as mobile browser chrome hides.
  */
+
+/**
+ * The gap between the screen and the bezel ring around it, and the two corner
+ * radii that gap has to keep concentric.
+ *
+ * The design nests two device masks: the screen at 680 wide on a 52px corner,
+ * and "Most Most outer device mask" at 696 on a 60px one — 8px further out on
+ * every side, which is exactly the difference between the radii. That is what
+ * makes the ring look machined rather than drawn: a constant-width gap all the
+ * way round, instead of a band that pinches at the corners.
+ */
+const BEZEL = 8
+const SCREEN_RADIUS = 52
+const BEZEL_RADIUS = SCREEN_RADIUS + BEZEL
 export function MobileFrame({ backdrop, children }: Props) {
   // The device fills the viewport exactly, so anything that makes the document
   // even slightly taller — a dev overlay, a mobile URL bar collapsing and
@@ -52,28 +66,60 @@ export function MobileFrame({ backdrop, children }: Props) {
       initial={{ opacity: 0, y: 28 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      // Capped rather than fixed at 1060. A hard height would overflow a
+      // Capped rather than fixed at 1100. A hard height would overflow a
       // shorter viewport, and with the document pinned there would be no way to
-      // scroll to what fell off — so it holds 1060 where there is room and
+      // scroll to what fell off — so it holds 1100 where there is room and
       // yields below it, the same bargain the spacing tokens make.
-      className="flex h-[min(100svh,1060px)] w-full justify-center px-3 pb-[68px]"
+      className="flex h-[min(100svh,1100px)] w-full justify-center px-3 pb-[68px]"
     >
       {/* `min-h-0` so the panel — the only flexible child — absorbs the loss on
           a short viewport instead of pushing the control bar off screen. */}
-      <div className="border-edge relative flex min-h-0 w-full max-w-[680px] flex-col gap-6 overflow-hidden rounded-b-[60px] border-[1.5px] border-t-0 pb-6">
-        {backdrop && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 overflow-hidden"
-          >
-            {backdrop}
-          </div>
-        )}
+      <div className="relative flex min-h-0 w-full max-w-[680px] flex-col">
+        {/* The screen. It carries the clip and no stroke of its own: the design
+            moved the device's one outline out to the ring below, so an edge
+            here as well would draw a second, tighter phone inside the first. */}
+        <div
+          className="relative flex min-h-0 flex-1 flex-col gap-6 overflow-hidden pb-6"
+          style={{
+            borderBottomLeftRadius: SCREEN_RADIUS,
+            borderBottomRightRadius: SCREEN_RADIUS,
+          }}
+        >
+          {backdrop && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 overflow-hidden"
+            >
+              {backdrop}
+            </div>
+          )}
 
-        {children}
+          {children}
 
-        {/* Home indicator, floated in the 23px strip below the control bar. */}
-        <div className="bg-edge absolute bottom-[8px] left-1/2 h-[5px] w-[144px] -translate-x-1/2 rounded-[100px]" />
+          {/* Home indicator, floated in the 23px strip below the control bar. */}
+          <div className="bg-edge absolute bottom-[8px] left-1/2 h-[5px] w-[144px] -translate-x-1/2 rounded-[100px]" />
+        </div>
+
+        {/* The bezel ring, drawn outside the screen rather than on it.
+            A sibling and not a child, because the screen clips — anything
+            inside it can only ever be drawn on the edge, never beyond it.
+            `border-t-0` for the same reason the screen has no top corner: the
+            device's top is above the fold, so the ring is two rails running off
+            the top of the frame and a rounded foot at the bottom.
+            It hangs 8px into the 68px strip below the phone. That is the
+            design's own overhang and there is room for it — the strip is where
+            the floating PlaygroundSwitcher sits, and it keeps the other 60. */}
+        <div
+          aria-hidden="true"
+          className="border-edge pointer-events-none absolute top-0 border-[1.5px] border-t-0"
+          style={{
+            left: -BEZEL,
+            right: -BEZEL,
+            bottom: -BEZEL,
+            borderBottomLeftRadius: BEZEL_RADIUS,
+            borderBottomRightRadius: BEZEL_RADIUS,
+          }}
+        />
       </div>
     </motion.div>
   )

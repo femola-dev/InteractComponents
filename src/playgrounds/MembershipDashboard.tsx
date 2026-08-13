@@ -419,7 +419,8 @@ export function MembershipDashboard() {
   const toggleChecked = useCallback((id: number) => {
     setChecked(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }, [])
@@ -471,7 +472,8 @@ export function MembershipDashboard() {
   const toggleTierFilter = useCallback((tier: TierId) => {
     setTierFilter(prev => {
       const next = new Set(prev)
-      next.has(tier) ? next.delete(tier) : next.add(tier)
+      if (next.has(tier)) next.delete(tier)
+      else next.add(tier)
       return next
     })
     setPage(1)
@@ -480,7 +482,8 @@ export function MembershipDashboard() {
   const toggleCompanyFilter = useCallback((company: CompanyId) => {
     setCompanyFilter(prev => {
       const next = new Set(prev)
-      next.has(company) ? next.delete(company) : next.add(company)
+      if (next.has(company)) next.delete(company)
+      else next.add(company)
       return next
     })
     setPage(1)

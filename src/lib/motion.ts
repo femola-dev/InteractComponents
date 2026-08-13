@@ -7,7 +7,7 @@
  * ([x1, y1, x2, y2]), not a CSS string — these arrays correspond 1:1 to the
  * --ease-* custom properties in index.css.
  */
-import type { Transition, Variants } from 'framer-motion'
+import type { SpringOptions, Transition, Variants } from 'framer-motion'
 
 export const ease = {
   smooth: [0.22, 1, 0.36, 1],
@@ -41,6 +41,45 @@ export const springResponsive: Transition = {
   stiffness: 400,
   damping: 30,
   mass: 0.8,
+}
+
+/** For a large surface changing shape — a pill growing into a tray and back.
+ *  Softer and heavier than `springResponsive`: at a 0.92 damping ratio it
+ *  settles without visible overshoot, which a box this size needs, while still
+ *  carrying the weight of a real spring rather than a fixed-duration ease. */
+export const springMorph: Transition = {
+  type: 'spring',
+  stiffness: 300,
+  damping: 32,
+  mass: 1,
+}
+
+/**
+ * A detented wheel: the Move carousel's rotation, and anything else that steps
+ * between fixed stops under its own momentum.
+ *
+ * `SpringOptions`, not `Transition`, because this drives a `useSpring` motion
+ * value rather than an `animate` prop — the difference matters. A `Transition`
+ * spring is re-solved from rest each time the target changes; a `useSpring`
+ * integrates one continuous state, so velocity survives a new target. That is
+ * the whole point here: hold the next key and each press lands on a wheel that
+ * is already moving, and the steps compound into one accelerating spin instead
+ * of restarting as a queue of identical hops.
+ *
+ * Tuned as a real second-order system rather than by eye. With
+ * ζ = c / 2√(km) = 24 / 2√(200 × 1.1) ≈ 0.81 it is underdamped just enough to
+ * pass the detent and settle back into it — the click of a wheel finding its
+ * stop — and ωn = √(k/m) ≈ 13.5 rad/s puts that settle at roughly 4/ζωn ≈ 0.37s.
+ * Push ζ to 1 and it creeps in dead; drop it to 0.6 and the overshoot reads as
+ * a wobble rather than a detent.
+ *
+ * `restDelta` is in degrees, since that is the unit the wheel's value carries.
+ */
+export const springWheel: SpringOptions = {
+  stiffness: 200,
+  damping: 24,
+  mass: 1.1,
+  restDelta: 0.01,
 }
 
 /** Badges, pops, anything that should overshoot slightly before settling. */
