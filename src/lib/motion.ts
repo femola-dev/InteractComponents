@@ -105,63 +105,181 @@ export const springWheel: SpringOptions = {
 }
 
 /**
- * The shuffle's throw — one timing table, driving both the cards and the sound.
+ * The shuffle's throw, in two acts: a flat fast cruise, then a spring that
+ * catches it and lets it die.
  *
- * This is the only reason any of it lines up. An easing curve for the rotation
- * and a separate rhythm for the clicks will always drift: eyeball them into
- * agreement and they part company the moment either is retuned. So the table
- * below says *when each card crosses the top of the wheel*, the carousel
- * animates through it as keyframes, and the roulette fires one fret at each
- * entry. A tick is not "roughly when a card goes past" — it is the card going
- * past, because they read the same array.
+ * What was here before was one timing table — fourteen keyframe times on a
+ * geometric ritardando, with the audio reading the same array so the clicks
+ * could not drift from the cards. It is gone, and what replaced it is both
+ * smaller and more honest, because the table was authoring the wrong half.
+ *
+ * A wheel's *throw* is a decision: how fast, how long. Its *ending* is not —
+ * that is just what a mass with drag does when you stop pushing it, and every
+ * number in a hand-built ritardando is a guess at a curve physics already
+ * knows. So the cruise is the only thing authored here, and the end is
+ * `springThrow` released into the final detent with the cruise's velocity still
+ * in it.
+ *
+ * Three things the table had to fake now fall out for free:
+ *
+ * - **The wheel eases in.** `springWheel` needs ~0.3s to reach cruise from
+ *   rest, so the reel spins up instead of starting at full speed.
+ * - **The sound follows.** The beeps fire on real detent crossings, so they
+ *   accelerate, hold, and slow down with the picture without knowing any of
+ *   these numbers.
+ * - **The ritardando is real.** It is a second-order settle, not 1.14 per step.
  */
-export const SPIN_SECONDS = 3
+export const SPIN_SECONDS = 4
 
 /**
- * Cards the wheel travels while a shuffle thinks.
+ * Seconds per card at cruise — the beat of the throw, and the one number that
+ * sets how fast the whole thing feels.
  *
- * Bounded at both ends. Under about ten, three seconds read as a pause with a
- * nudge in it rather than as a spin. Above twenty the cost shows: the carousel
- * mounts every card the rim crosses, each panel carries four copies of its
- * poster for the blur ramp, and the posters come off a CDN — so each extra
- * detent is a live image fetch. Fourteen still reads as a reel and the network
- * still keeps up.
+ * 85ms is about as tight as the beeps can be packed and still be counted: the
+ * pip's own envelope runs ~54ms, so at this spacing each one has died before
+ * the next lands. Under about 70ms they smear into a buzz and the wheel stops
+ * sounding like it is counting anything.
+ *
+ * The old table only touched this tempo for its first two cards before the
+ * ritardando took over — average gap across the throw was 206ms. Holding it
+ * flat for the whole cruise is most of why this reads so much faster now, and
+ * none of it is a higher top speed.
  */
-export const SPIN_DETENTS = 14
+const SPIN_TEMPO = 0.085
 
 /**
- * How much wider each gap is than the one before it — the whole shape of the
- * deceleration, in one number.
+ * The tail the spring gets to itself, out of the four seconds.
  *
- * A wheel losing energy is the only thing separating a spin from a machine gun,
- * and geometric is how it actually loses it: friction takes a fraction of what
- * is left, not a fixed amount. At 1.14 the gaps run 77ms to 420ms across the
- * throw. Flatten it towards 1.0 and the spin becomes a metronome; push it past
- * about 1.2 and the whole thing is over in the first second, leaving two
- * seconds of a wheel that has visibly already stopped.
+ * Sized by the *last card*, not by the spring's own settling time. A
+ * second-order settle is asymptotic: the final card is over the top of the
+ * wheel long before the maths finishes, and everything after that is a wheel
+ * the eye has already read as stopped. Give the spring the full time it wants
+ * to land within a fifth of a degree and you buy half a second of dead air.
+ *
+ * So this is set by where the card *arrives*: 1.1s puts the wheel within eight
+ * pixels of its seat at almost exactly four seconds. The last detent crossing
+ * is 520ms before that and is not the end of anything — at that moment the card
+ * is still half a pitch out and travelling — which is the distinction that
+ * matters here and the one that used to be got wrong.
  */
-const SPIN_SLOWING = 1.14
+export const SPIN_SETTLE = 1.1
 
-/** Left at the end for the ball to drop, after the last card has landed. */
-const SPIN_SETTLE = 0.12
+/** The driven half: constant speed, no easing, from the press to the handover. */
+export const SPIN_THROW = SPIN_SECONDS - SPIN_SETTLE
 
 /**
- * When each card crosses the top of the wheel, in seconds from the press.
+ * Cards crossed under power, and cards coasted after it — 34 and 3.
  *
- * The gaps are generated as bare ratios and then scaled to fit, rather than
- * being picked in milliseconds — which is what keeps `SPIN_SLOWING` a free
- * parameter. Retune the deceleration, or the length, or the number of cards,
- * and the table still ends exactly where it should instead of needing three
- * constants solved against each other by hand.
+ * The coast is the length of the ritardando, and it trades directly against how
+ * cleanly the card arrives. Both come out of one relation: a spring sheds v over
+ * a distance d ≈ v/ωn and takes ~5.9/ζωn to actually get there, so
+ *
+ *     coast (cards) ≈ rate × ζ × arrival-time / 5.9
+ *
+ * At 11.7 cards/s and a 1.1s tail that is three, and three is what fits. Five
+ * was tried and it is where this went wrong: a spring soft enough to coast five
+ * cards is still 300px from its seat when the last card crosses, and crawls the
+ * rest over another 800ms. The ritardando sounded better and the card never
+ * quite landed — the ending you could hear and the ending you could see were
+ * half a second apart.
+ *
+ * So the gaps are the ones three cards buy:
+ *
+ *     85ms · 86 · 95 · 125 · 240 · [pocket at +523]
+ *
+ * Nothing chose those. They are what a spring crossing evenly spaced detents
+ * does, and the widening accelerates because the approach is exponential. The
+ * pocket is the last beat of the same curve — it lands on the arrival, which is
+ * half a pitch and half a second past the final crossing, and that long last
+ * interval is the ritardando resolving rather than a gap in it.
  */
-export const SPIN_CROSSINGS: number[] = (() => {
-  const gaps = Array.from({ length: SPIN_DETENTS }, (_, i) => SPIN_SLOWING ** i)
-  const total = gaps.reduce((sum, gap) => sum + gap, 0)
-  const span = SPIN_SECONDS - SPIN_SETTLE
+export const SPIN_CRUISE_DETENTS = Math.round(SPIN_THROW / SPIN_TEMPO)
+export const SPIN_COAST_DETENTS = 3
 
-  let elapsed = 0
-  return gaps.map((gap) => (elapsed += (gap / total) * span))
-})()
+/**
+ * Cards the wheel travels in total.
+ *
+ * Nearly three times what the old table ran, and the cost is not what the count
+ * suggests. The carousel mounts every card the rim crosses, and each panel
+ * carries four copies of its poster for the blur ramp — but the window is five
+ * panels wide whatever the throw does, so the *concurrent* load is fixed. What
+ * scales is fetches, and those are bounded by the deck rather than by the
+ * throw: 37 crossings of a 38-film deck is one lap, and a second lap would be
+ * the browser's cache.
+ */
+export const SPIN_DETENTS = SPIN_CRUISE_DETENTS + SPIN_COAST_DETENTS
+
+/** Cards per second at cruise. Multiply by the wheel's step for degrees. */
+export const SPIN_CRUISE_RATE = SPIN_CRUISE_DETENTS / SPIN_THROW
+
+/**
+ * The wheel dying: a spring released into the last detent with the throw's
+ * velocity still in it.
+ *
+ * Solved from the two things the throw hands it, not tuned by eye. To shed a
+ * velocity v over a distance d without sailing past the target, a second-order
+ * system wants ωn ≈ v/d. The cruise runs at 34 cards / 2.9s × 14° = 164°/s, the
+ * coast is three cards of 14° = 42°, so ωn ≈ 3.9 rad/s. At mass 1 that is
+ * `stiffness = ωn²` ≈ 15.3, and `damping = 2ζωn` ≈ 7.35 puts ζ at 0.94.
+ *
+ * Soft numbers by the standards of the rest of this file, and they should be:
+ * every other spring here settles a control in a few hundred milliseconds, and
+ * this one is a wheel with a second of momentum left in it.
+ *
+ * Just under critical, not over. Overdamping reads as the wheel being *held*
+ * rather than running out — and it is slower, since the dominant pole of an
+ * overdamped pair drifts towards zero. At ζ = 0.94 the overshoot is a few
+ * thousandths of a degree: the wheel does not back up, it simply stops
+ * arriving.
+ *
+ * This is a `Transition` and not a `SpringOptions` because it drives an
+ * `animate()` call rather than a `useSpring` — the throw is a discrete event
+ * with a beginning, not a value being tracked.
+ */
+export const springThrow: Transition = {
+  type: 'spring',
+  stiffness: 15.3,
+  damping: 7.35,
+  mass: 1,
+}
+
+/**
+ * How close the wheel has to be to its seat to count as arrived, as a fraction
+ * of one card.
+ *
+ * A fraction and not a pixel count, because one detent *is* one card pitch by
+ * construction — the wheel's radius is solved from the measured pitch — so this
+ * is about eight pixels at the design's 620px card and stays proportionate on a
+ * narrower device.
+ *
+ * There has to be a threshold at all because the approach is exponential and
+ * "arrived" never strictly happens. The two obvious signals are both wrong: the
+ * final detent crossing is half a pitch out with 950px/s still on the card, and
+ * Framer's own `onComplete` calls the spring finished with 22px to go and
+ * 187px/s of movement left, because its rest thresholds are tuned for values at
+ * pixel scale and this one is in degrees. Eight pixels is where the card reads
+ * as stopped.
+ */
+export const SPIN_ARRIVED = 0.013
+
+/**
+ * The speed the reveal's blur leaves at, so it rides the settle exactly.
+ *
+ * The trick is that a spring is linear, so two values given the same spring and
+ * the same *normalised* initial velocity trace the same curve whatever their
+ * units. The wheel enters the coast at `SPIN_CRUISE_RATE` cards per second with
+ * `SPIN_COAST_DETENTS` cards to go; divide one by the other and the cards
+ * cancel, leaving the fraction-of-the-journey per second that a focus running
+ * 1 → 0 has to start at to arrive in step with it.
+ *
+ * Negative because the blur is leaving while the wheel is arriving.
+ *
+ * This is what makes "the card comes into focus as it eases into place" a fact
+ * rather than a pair of animations tuned until they looked close. Retune
+ * `springThrow` and the two stay locked, because neither of them is holding a
+ * duration.
+ */
+export const SPIN_FOCUS_RATE = -SPIN_CRUISE_RATE / SPIN_COAST_DETENTS
 
 /** Badges, pops, anything that should overshoot slightly before settling. */
 export const springOvershoot: Transition = {

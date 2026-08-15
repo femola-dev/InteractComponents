@@ -31,8 +31,7 @@
  * `prefers-reduced-motion` is set, so a user who has asked for less gets
  * silence without anything here having to ask.
  */
-import type { SequenceStep, SoundDefinition } from '@web-kits/audio'
-import { SPIN_CROSSINGS, SPIN_SECONDS } from './motion'
+import type { SoundDefinition, SoundPatch } from '@web-kits/audio'
 
 /**
  * Master volume for the whole app.
@@ -80,10 +79,10 @@ export const DETENT: SoundDefinition = {
  * the one thing that always sounds like a computer, so the detent and the
  * pocket are both strikes that fall away. A roulette table is the exception,
  * and it is an exception with a reason — that sound is not an object hitting
- * something, it is a *counter*, and a counter beeps. Fourteen of them at a
- * tempo that halves says "still counting" far more plainly than fourteen
- * clicks, because a click is over the moment it happens and a tone occupies
- * the gap it sits in.
+ * something, it is a *counter*, and a counter beeps. Forty of them, flat out
+ * and then running down, says "still counting" far more plainly than forty
+ * clicks would, because a click is over the moment it happens and a tone
+ * occupies the gap it sits in.
  *
  * A square for the body, lowpassed hard. Square is what makes it read as a pip
  * rather than a note, but its upper harmonics are pure buzzer, and 3600Hz is
@@ -136,46 +135,96 @@ const POCKET: SoundDefinition = {
 }
 
 /**
- * The beeps descend as the wheel slows: a fifth down across the fourteen.
- *
- * Geometric, so it falls in even musical steps rather than even hertz — the ear
- * hears ratios, and a linear drop from 1300 to 820 would crawl at the top and
- * plummet at the bottom.
+ * The beeps descend as the wheel slows: 1300Hz down to 820 across the throw.
  *
  * Pitch and tempo carrying the same message is the point. The wheel losing
  * energy shows up twice, once in the widening gaps and once in the falling
  * tone, and two channels saying "slowing down" is what makes the last beep land
  * as an ending rather than as a pause.
+ *
+ * The fall is expressed in cents rather than as a table of frequencies, which
+ * is both the honest unit and the one the player can use. The ear hears ratios,
+ * so even musical steps *are* a linear ramp in cents — a straight drop from
+ * 1300Hz to 820Hz would crawl at the top and plummet at the bottom. And the
+ * whole ladder can now ride one sound definition, detuned per hit, because
+ * `detune` is the one pitch control a `PlayOptions` carries.
+ *
+ * -798 cents, which is a minor sixth rather than the fifth this comment used to
+ * claim. The endpoints are unchanged and were always the thing being tuned; it
+ * is the interval name that was wrong.
  */
 const BEEP_HIGH = 1300
 const BEEP_LOW = 820
-
-const beepAt = (i: number, count: number) =>
-  BEEP_HIGH * (BEEP_LOW / BEEP_HIGH) ** (i / Math.max(1, count - 1))
+const BEEP_FALL = 1200 * Math.log2(BEEP_LOW / BEEP_HIGH)
 
 /**
- * Shuffle: one beep per card, at the exact moment that card goes past.
- *
- * The timing is not designed here. `SPIN_CROSSINGS` says when each card reaches
- * the top of the wheel, the carousel animates through that same array as
- * keyframes, and every step below is pinned to it with `at` — absolute
- * placement rather than `wait`, so a beep cannot accumulate drift over fourteen
- * additions. What you hear is what you see, by construction rather than by
- * tuning: the beeping slows because the cards do, from 77ms apart at the throw
- * to 420ms at the last one.
- *
- * The volume ramp is gentle, down to about 0.75 by the last beep. A wheel does
- * quieten as it loses energy, but ramping it hard over three seconds makes the
- * spin sound like it is receding into the distance rather than settling in
- * front of you.
+ * Where the beep sits, given how far through the throw the wheel is (0 at the
+ * press, 1 at the last card). Clamped, because the caller counts real detent
+ * crossings and a wheel that overshoots its stop can produce one more than the
+ * throw asked for.
  */
-export const ROULETTE: SequenceStep[] = [
-  ...SPIN_CROSSINGS.map((at, i) => ({
-    sound: beep(beepAt(i, SPIN_CROSSINGS.length)),
-    at,
-    volume: 1 - i * 0.018,
-  })),
-  // Last of all, in the gap the table leaves for it: the card has landed and
-  // the ball drops into the pocket behind it.
-  { sound: POCKET, at: SPIN_SECONDS },
-]
+export const beepDetune = (progress: number) =>
+  BEEP_FALL * Math.min(1, Math.max(0, progress))
+
+/**
+ * How much quieter the last beep is than the first — a gentle ramp, down to
+ * about 0.75.
+ *
+ * A wheel does quieten as it loses energy, but ramping it hard over three
+ * seconds makes the spin sound like it is receding into the distance rather
+ * than settling in front of you.
+ */
+export const beepVolume = (progress: number) =>
+  1 - 0.25 * Math.min(1, Math.max(0, progress))
+
+/**
+ * Shuffle: one beep per card, and the pocket the ball drops into behind the
+ * last of them.
+ *
+ * A patch rather than the sequence this used to be, and that is the whole fix.
+ * A sequence is a timetable — it booked its beeps against the carousel's
+ * keyframe table at the moment it started, and from then on it was playing a
+ * recording of a spin rather than the spin in front of you. That worked only as
+ * long as the keyframe table described what was on screen, and it never did:
+ * the table drove `target`, which is the *input* to `springWheel`, and the
+ * wheel you watch is the spring's output. A spring following a ramp sits a
+ * fixed distance behind it — about 2ζv/ωn — so at the top of the throw the
+ * picture ran a card and a half behind the sound, closing to about a third of a
+ * card by the end. Beeps, none of them landing on a card, with the error
+ * sliding the whole way down.
+ *
+ * So the timetable is gone and the wheel triggers its own sound. The carousel
+ * already watches the rendered angle to decide which cards to mount; it now
+ * beeps off that same signal, one hit per detent the rim actually crosses. The
+ * old comment claimed "what you hear is what you see, by construction" — this
+ * is the version where that is true, because the thing making the sound is the
+ * thing you are looking at.
+ *
+ * It is also what lets the throw be shaped by physics rather than by a table.
+ * The spin now cruises flat and is brought to rest by `springThrow`, and the
+ * beeps pick up the whole arc of that for free: they accelerate as the reel
+ * spins up (103ms, 87, 85), hold at 85ms for the cruise, and run down through
+ * 86ms, 95, 125, 240 as the spring dies. Not one of those numbers is written
+ * anywhere. They are what the wheel did.
+ *
+ * The pocket is the last beat of that same ritardando, at +523ms — and it is
+ * the one sound here that waits for the picture rather than for a card. A
+ * detent is crossed halfway between two cards, so the final beep sounds while
+ * the chosen card is still 308px out and moving; the ball drops half a second
+ * later, when the wheel is actually in its seat. Which is why that gap is long,
+ * and why it is not a gap.
+ *
+ * A patch is what makes it possible: `useSound` bakes its options in at hook
+ * time and hands back a play function that takes no arguments, so it cannot
+ * carry a pitch that changes per hit. `usePatch` accepts an in-memory patch and
+ * its `play(name, opts)` takes `PlayOptions` — while still going through the
+ * provider's volume and mute, which a bare `defineSound` would bypass.
+ */
+export const SHUFFLE: SoundPatch = {
+  name: 'shuffle',
+  sounds: {
+    // One definition at the top of the ladder; `beepDetune` walks it down.
+    beep: beep(BEEP_HIGH),
+    pocket: POCKET,
+  },
+}

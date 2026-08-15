@@ -10,25 +10,35 @@ import {
   useSpring,
   useTransform,
 } from 'framer-motion'
-import type { MotionValue, Transition } from 'framer-motion'
-import { useSequence, useSound } from '@web-kits/audio/react'
+import type {
+  AnimationPlaybackControls,
+  MotionValue,
+  Transition,
+} from 'framer-motion'
+import { usePatch, useSound } from '@web-kits/audio/react'
 import { MiddleTruncate } from '../components/MiddleTruncate'
 import { MobileFrame, SCREEN_RADIUS } from '../components/MobileFrame'
 import { useRise } from '../components/rise'
 import { FILMS } from '../lib/films'
 import type { Detail, Slide } from '../lib/films'
 import {
-  SPIN_CROSSINGS,
+  SPIN_ARRIVED,
+  SPIN_COAST_DETENTS,
+  SPIN_CRUISE_RATE,
+  SPIN_DETENTS,
+  SPIN_FOCUS_RATE,
   SPIN_SECONDS,
+  SPIN_THROW,
   ease,
   pressable,
   springMorph,
   springResponsive,
+  springThrow,
   springWheel,
   transitionFast,
   transitionSmooth,
 } from '../lib/motion'
-import { DETENT, ROULETTE } from '../lib/sound'
+import { DETENT, SHUFFLE, beepDetune, beepVolume } from '../lib/sound'
 import backdrop from '../assets/images/move-backdrop.jpg'
 import iconArrowTriangleLeft from '../assets/icons/IconArrowTriangleLeft.svg'
 import iconArrowTriangleRight from '../assets/icons/IconArrowTriangleRight.svg'
@@ -100,34 +110,66 @@ const SEAT_SCALE = 0.874
 const PANEL_RADIUS = 30
 
 /**
- * The reveal when a shuffle lands — a focus pull, not a cut.
+ * The reveal — a focus pull, and now the deceleration itself.
  *
- * The deck has to change in one frame: the film comes from a genre the wheel
- * was never spinning through, so there is nothing to travel past and `land`
- * can only jump. What makes that jump invisible is that it happens while the
- * carousel is 22px out of focus and a step short of full size, so the frame it
- * lands on is one nobody can read.
+ * This used to happen at the end and it is why the ending read as a jump. The
+ * wheel would coast to a beautiful stop on some card of the *old* deck, hold it
+ * for a moment, and only then blur, cut to the new deck, and unblur onto a
+ * different film. The ease-out was selecting a card that was not the answer.
+ * Every part of that was smooth and the whole of it was a substitution.
  *
- * Two phases, and the order is the whole point. The blur goes *up* over the
- * last 250ms of the spin, while the wheel is still coasting into its final
- * detent — so by the time the swap happens the picture is already gone, and
- * the last card the reels showed is never seen to be the wrong one. Then it
- * comes back over 0.7s: the lens finding the new film rather than a card being
- * dealt.
+ * So the swap moved to the *handover*, at the top of the coast, and the seat
+ * the wheel is aiming at is now chosen so that the deck lands the right film in
+ * it — see `shuffle`. The wheel never jumps, the deck never changes under a
+ * still picture, and the last five cards the reels show are the new genre's,
+ * with the answer among them. What the ease-out lands on is the answer.
+ *
+ * That leaves the blur one job instead of two. It is no longer hiding a cut at
+ * the end; it is hiding a content swap in the middle, at the fastest and least
+ * readable moment of the throw. Up over 350ms into the handover, then down
+ * across the whole coast — so the chosen card comes into focus at exactly the
+ * rate it eases into place.
+ *
+ * "Exactly" is meant literally. The reveal is not a duration, it is
+ * `springThrow` again, started at `SPIN_FOCUS_RATE` — the same normalised
+ * velocity the wheel enters its coast at. A spring is linear, so a focus given
+ * the same spring and the same normalised velocity traces the same curve the
+ * wheel does. They cannot drift, because neither is holding a clock.
  *
  * Raising the blur before the swap rather than at it is not a refinement, it is
  * the only order that works. `useEffect` runs after paint, so a blur applied on
- * landing would arrive a frame late — one frame of the new poster, fully sharp,
+ * the swap would arrive a frame late — one frame of the new deck, fully sharp,
  * which is exactly the cut this exists to hide.
- *
- * The 0.7s back is longer than the beam takes to lift (0.45s) on purpose. The
- * lights come up first and the picture sharpens after, which is the order those
- * two things happen in a room.
  */
 const LANDING_BLUR = 22
 const LANDING_SWELL = 0.04
-const LANDING_DEFOCUS = 0.25
-const LANDING_SECONDS = 0.7
+const LANDING_DEFOCUS = 0.35
+
+/**
+ * The same focus pull, at the length of a smaller event: a genre picked out of
+ * the tray.
+ *
+ * A genre change has the same problem the shuffle does and no spin to hide it
+ * behind. The new deck is a different set of films — there is nothing between
+ * the card on screen and the one replacing it to travel past, so the carousel
+ * can only cut. Pulling focus first turns that cut into a lens finding a
+ * different film, which is the same story the landing tells.
+ *
+ * Same *depth*, deliberately. The blur's depth is what hides the swap — 22px is
+ * where the frame it lands on has nothing readable left in it — and that number
+ * does not get smaller because the event that caused it did. What gets smaller
+ * is how long you spend there: a shuffle has four seconds of throw behind it
+ * and can afford a slow lens, a genre pick has a tap.
+ *
+ * 160ms out is the ceiling, not a preference. The deck has to change while the
+ * picture is gone, so the tap and the new card cannot be the same frame — and
+ * past about 200ms that gap stops reading as the transition and starts reading
+ * as the app being slow to answer. Coming back is unhurried by comparison, for
+ * the same reason the landing's is: focus arriving is the reveal, focus leaving
+ * is just getting out of the way.
+ */
+const GENRE_DEFOCUS = 0.16
+const GENRE_SECONDS = 0.5
 
 /** Ties the pill and the tray together as one morphing surface. */
 const GENRE_SURFACE = 'genre-surface'
@@ -308,8 +350,30 @@ const GENRE_MENU: {
   { genre: 'Sport', icon: iconVolleyball, tile: '#43fff5', glyph: '#000505' },
 ]
 
-/** A shuffle in flight, decided at the press and held until the timer fires. */
-type Spin = { film: Slide; genre: string }
+/**
+ * A shuffle in flight — the entire result, decided at the press.
+ *
+ * `rest` is the one that matters, and it is why the ending works. It is the
+ * *seat* the wheel will come to a stop in, as an unbounded detent index, fixed
+ * before the wheel has moved. Everything else is derived from it: the film is
+ * whatever the new deck puts in that seat, and the coast is aimed at it. The
+ * wheel is not spun and then corrected — it is thrown at a known target.
+ *
+ * `sort` rides along because the seat is only meaningful against the ordering
+ * it was computed in. Re-sorting mid-throw would put a different film in the
+ * seat the wheel is already committed to, so the order in force at the press is
+ * what lands, and a sort chosen during a spin applies to the next one.
+ */
+type Spin = {
+  film: Slide
+  genre: string
+  sort: SortKey
+  from: number
+  rest: number
+  /** What the pill and the ambience were showing when the key was pressed. */
+  wasFilm: Slide
+  wasGenre: string
+}
 
 /** The design opens on the filled panel, with a sliver of each neighbour. */
 const START_INDEX = 1
@@ -365,10 +429,22 @@ export function Move() {
   // carousel is at rest, which is also what every guard reads.
   const [spin, setSpin] = useState<Spin | null>(null)
   const spinning = spin !== null
-  // Bumped once per landing. A counter and not a boolean, because two shuffles
-  // in a row have to be two separate reveals — a flag would already be `true`
-  // the second time and the effect below would never re-run.
-  const [landings, setLandings] = useState(0)
+  // A genre chosen but not yet applied: the deck waits here for the picture to
+  // go out of focus, so the swap happens on a frame nobody can read.
+  const [pendingGenre, setPendingGenre] = useState<string | null>(null)
+  // The picture coming back, and how long it takes — a shuffle landing and a
+  // genre change are the same reveal at two different lengths.
+  //
+  // A fresh object each time rather than a flag, because two reveals in a row
+  // have to be two separate effects: a boolean would already be `true` the
+  // second time and the effect below would never re-run.
+  const [reveal, setReveal] = useState<{ transition: Transition } | null>(null)
+  // Past the handover: the deck has landed and the wheel is coasting into it.
+  // The beam reads this rather than `spin`, so the lights come up as the throw
+  // stops being a throw instead of a second after the card has already
+  // resolved — the room brightens first and the picture sharpens into it, which
+  // is the order those two things happen in.
+  const [coasting, setCoasting] = useState(false)
   const rise = useRise()
   const reducedMotion = useReducedMotion()
 
@@ -383,7 +459,10 @@ export function Move() {
   // blind, small enough that a run of steps still sounds like one object.
   const playForward = useSound(DETENT, { detune: 110 })
   const playBack = useSound(DETENT, { detune: -110 })
-  const { play: playSpin } = useSequence(ROULETTE)
+  // A patch and not a sequence, because the shuffle's beeps are no longer on a
+  // timetable — the wheel fires each one as it passes a card, and each needs a
+  // different pitch. See `SHUFFLE`.
+  const shuffleKit = usePatch(SHUFFLE)
 
   // The pill and the tray are one surface, so the box between them is driven by
   // a spring rather than a duration: the travel is long and mostly vertical, and
@@ -402,6 +481,17 @@ export function Move() {
   const current = deck.slides[wrap(index, count)]
   const atStart = !looping && index === 0
   const atEnd = !looping && index === count - 1
+
+  // What the pill and the ambience read, which is not always what the carousel
+  // is showing. A throw lands its deck at the handover — a second before the
+  // wheel stops — so from that moment the cards on the rim are the new genre's
+  // while `current` already points at the answer. Handing that straight to the
+  // pill would print the result in words a beat before the wheel arrives at it,
+  // which is the one thing a shuffle must not do. So while a throw is in flight
+  // these hold what was on screen when the key was pressed, and change over on
+  // the frame the wheel comes to rest.
+  const shownFilm = spin ? spin.wasFilm : current
+  const shownGenre = spin ? spin.wasGenre : deck.genre
 
   // The wheel's pitch is measured rather than assumed, so the circle tightens
   // with the device instead of the cards drifting apart or overlapping. The
@@ -444,8 +534,14 @@ export function Move() {
   // steps one detent and settles.
   const target = useMotionValue(index * WHEEL_STEP_DEG)
   useEffect(() => {
+    // Not during a throw. A shuffle sets `index` at the handover — mid-flight,
+    // to the seat the wheel is still travelling towards — and this would read
+    // that as an instruction to be there already, teleporting the wheel to its
+    // destination and cancelling the coast. By the time the spin ends the two
+    // agree, so the run this skips is one that would have changed nothing.
+    if (spinning) return
     target.set(index * WHEEL_STEP_DEG)
-  }, [index, target])
+  }, [index, target, spinning])
   const spring = useSpring(target, springWheel)
   // Reduced motion reads the target directly — same end state, no travel. Both
   // hooks still run, so the swap is a choice of which value to render, not a
@@ -460,9 +556,61 @@ export function Move() {
   // out of an empty frame. It costs one render per detent crossed, not one per
   // frame, because only the rounded value is state.
   const [rim, setRim] = useState(index)
+  // The rim as a ref as well as state. Several `change` events can land between
+  // two renders, and state would still be reporting the previous detent for all
+  // of them — fine for deciding what to mount, useless for deciding whether
+  // *this* event is the one that crossed a card.
+  const rimRef = useRef(index)
+  // Latches the landing below. `setSpin(null)` would do the same job, but not
+  // until the next render, and several frames can pass first — which would be
+  // several pockets.
+  const landedRef = useRef(false)
+
   useMotionValueEvent(wheel, 'change', (degrees) => {
+    // The landing — the ball into the pocket, and the end of the throw.
+    //
+    // This used to fire on the last detent crossing, which is why the sound ran
+    // ahead of the picture. A detent is crossed at the *midpoint* between two
+    // cards: at that moment the chosen card is still half a pitch out — 308px —
+    // and travelling at 950px/s. The ear was told it had landed while the eye
+    // could see it flying. Waiting for the wheel to actually be in its seat
+    // puts the pocket 520ms later, on the frame the card comes to rest with the
+    // blur already at zero.
+    //
+    // Ending the spin here rather than on the four-second clock is the same
+    // point made twice: the throw is over when the wheel has arrived, and only
+    // the wheel knows when that is. Clearing `spin` is also what stops this
+    // running again, but not before the next render — hence the latch.
+    if (spin && !landedRef.current) {
+      const remaining = Math.abs(spin.rest * WHEEL_STEP_DEG - degrees)
+      if (remaining < WHEEL_STEP_DEG * SPIN_ARRIVED) {
+        landedRef.current = true
+        shuffleKit.play('pocket')
+        setSpin(null)
+      }
+    }
+
     const detent = Math.round(degrees / WHEEL_STEP_DEG)
-    setRim((previous) => (previous === detent ? previous : detent))
+    if (detent === rimRef.current) return
+    rimRef.current = detent
+    setRim(detent)
+
+    // The sound of the shuffle, and the whole reason it lines up: this fires on
+    // the *rendered* angle crossing a detent, which is a card going past the
+    // top of the wheel. Not a schedule that describes one.
+    //
+    // Only during a throw. A chevron step crosses a detent too, and that press
+    // has already made its own noise.
+    if (!spin) return
+
+    // Zero on the first card past, one on the last, read off the seats the
+    // throw was committed to rather than off a count of events — so a dropped
+    // frame costs a beep instead of shifting every pitch after it.
+    const progress = (detent - spin.from - 1) / (spin.rest - spin.from - 1)
+    shuffleKit.play('beep', {
+      detune: beepDetune(progress),
+      volume: beepVolume(progress),
+    })
   })
 
   // A card's angle is fixed to the wheel; turning the wheel is what moves it.
@@ -511,6 +659,9 @@ export function Move() {
     setSort(nextSort)
     setIndex(nextIndex)
     setRim(nextIndex)
+    // The ref moves with the state or the next `change` event reads a stale
+    // detent and counts a crossing the wheel never made.
+    rimRef.current = nextIndex
 
     const degrees = nextIndex * WHEEL_STEP_DEG
     target.jump(degrees)
@@ -520,37 +671,35 @@ export function Move() {
   // Genre is the tray's headline choice, so picking one closes it. Year and
   // sort are refinements of that same choice — the tray stays open so they can
   // be combined without reopening it each time.
-  const chooseGenre = (next: string) => {
-    rebuild({ genre: next })
-    setTrayOpen(false)
-  }
-
-  // Land the wheel on one specific film, in whatever deck holds it. The sibling
-  // of `rebuild`: same jump, same velocity clear, but it aims at a film rather
-  // than at the deck's opening slot.
   //
-  // The year filter is dropped rather than carried. Shuffle now reaches the
-  // whole library, and a film picked from all forty has no reason to satisfy a
-  // year the last genre happened to be filtered by — keeping it would build a
-  // deck the result isn't in. The sort survives, because it is an ordering
-  // preference rather than a narrowing of what exists.
-  const land = (nextGenre: string, film: Slide) => {
-    const nextDeck = buildDeck(nextGenre, ANY_YEAR, sort)
-    // `buildDeck` filters `FILMS`, so the deck holds the same objects the pick
-    // came from and identity is enough. The fallback is unreachable given the
-    // genre came off the film itself, and is here so a future change to either
-    // can't strand the wheel on a negative index.
-    const found = nextDeck.slides.indexOf(film)
-    const nextIndex = found >= 0 ? found : openingIndex(nextDeck)
+  // The deck does not change here. It changes 160ms later, once the focus pull
+  // below has taken the picture away — see `GENRE_DEFOCUS`. Everything else
+  // about the press is immediate: the tray closes on the tap, and only the card
+  // waits.
+  const chooseGenre = (next: string) => {
+    setTrayOpen(false)
 
-    setGenre(nextGenre)
-    setYear(ANY_YEAR)
-    setIndex(nextIndex)
-    setRim(nextIndex)
+    // Picking the genre already showing is not a change, and a focus pull that
+    // resolves onto the same card reads as a glitch rather than as a transition.
+    if (next === genre) return
 
-    const degrees = nextIndex * WHEEL_STEP_DEG
-    target.jump(degrees)
-    spring.jump(degrees)
+    if (reducedMotion) {
+      rebuild({ genre: next })
+      return
+    }
+
+    // An explicit choice beats a random one, so picking a genre mid-throw
+    // abandons the throw rather than racing it. Clearing `spin` tears its
+    // effect down — reels stopped, timer cancelled — and the pull below then
+    // runs exactly as it would have from rest.
+    //
+    // Note what is deliberately *not* done here: the focus is left wherever the
+    // throw's defocus had got to. The pull animates from the current value, so
+    // a half-blurred picture simply continues into the blur rather than
+    // snapping sharp and going out again.
+    if (spinning) setSpin(null)
+
+    setPendingGenre(next)
   }
 
   // Shuffle reaches the whole library, not the deck in front of it.
@@ -561,124 +710,232 @@ export function Move() {
   // bounding it. Which also means the genre on the pill is an *outcome* of a
   // shuffle, not an input to it.
   //
-  // The result is chosen up front and held for three seconds rather than
-  // decided when the timer fires. That is what lets the beam know which colour
-  // it is settling into before it gets there, and it keeps the whole spin
-  // deterministic once it has started: what lands is fixed at the press.
+  // ## The seat picks the film, not the other way round
+  //
+  // This reads backwards and it is the whole reason the ending lands. The
+  // obvious order — pick a film, then find where it sits — cannot produce a
+  // fixed-length throw: the wheel wraps a deck of 38, so lining a *given* film
+  // up under the rim needs up to 37 extra detents, which is a second and a half
+  // of throw that varies with the draw. Every alternative is worse: vary the
+  // duration and the four seconds are gone, vary the speed and the beat of the
+  // beeps changes with the luck of the pick.
+  //
+  // So the geometry is fixed first. The wheel is going to travel exactly
+  // `SPIN_DETENTS`, which lands it in a known seat; the genre is drawn, and
+  // whatever film that deck puts in that seat is the result. The film is no
+  // less random for being read out of the wheel instead of into it — the deck's
+  // order has nothing to do with where the rim happens to be — and the throw is
+  // the same length every single time.
+  //
+  // The result is still decided entirely at the press: the beam knows which
+  // colour it is settling into before it gets there, and nothing about the spin
+  // is left to be computed when it ends.
   const shuffle = () => {
     // A second press mid-spin is ignored rather than queued. Restarting would
-    // desynchronise the beam and the sequence from the timer that is already
-    // running, and there is nothing useful for a re-roll to mean while the
-    // first one is still deciding.
+    // desynchronise the beam from the timer that is already running, and there
+    // is nothing useful for a re-roll to mean while the first one is still
+    // deciding.
     if (spinning) return
+    setCoasting(false)
+    landedRef.current = false
 
-    // Rerolls until it lands somewhere new, so a shuffle never looks like a
-    // dead button.
-    let film = current
-    while (film === current) {
-      film = FILMS[Math.floor(Math.random() * FILMS.length)]
-    }
-    // A film sits in several of the menu's rows; the pill can only show one, so
-    // the genre is drawn from its own list rather than assumed. Random and not
-    // `[0]`, so the same film arriving twice can still surface under a
-    // different heading.
+    // Genre first, since it is what selects the deck the seat will be read
+    // from. Uniform over the menu rather than over the library — the two are
+    // near enough with 35 to 40 films behind every row, and this way a shuffle
+    // cannot favour whichever genre happens to be biggest.
     const nextGenre =
-      film.genres[Math.floor(Math.random() * film.genres.length)]
+      GENRE_MENU[Math.floor(Math.random() * GENRE_MENU.length)].genre
+    // The year is dropped rather than carried: a film reached from any genre
+    // has no reason to satisfy a year the last one happened to be filtered by,
+    // and keeping it would build a deck the result isn't in.
+    const nextDeck = buildDeck(nextGenre, ANY_YEAR, sort)
 
-    setSpin({ film, genre: nextGenre })
-    // Fires either way. A one-film deck has nowhere to shuffle to, but the key
-    // was still pressed, and silence there reads as a broken button rather
-    // than as an empty deck.
-    playSpin()
+    // Every genre carries 35 to 40 films, so this deck always loops and an
+    // unbounded seat always folds onto a real card. A deck that did not loop
+    // would clamp instead, and the wheel would be aiming at a seat with nothing
+    // in it — which is why this reads the genre menu and never the year filter.
+    // Measured from `index` and not from the live rim: the two agree at rest,
+    // but a shuffle pressed while a chevron step is still travelling would
+    // otherwise measure from a wheel that has not arrived yet, and the cruise
+    // would carry a different number of cards than the tempo was solved for.
+    const from = index
+    let rest = from + SPIN_DETENTS
+    // A shuffle that lands on the film already showing looks like a dead
+    // button. One more detent is a different film and 85ms nobody can measure —
+    // cheaper than rerolling the genre and rebuilding the deck.
+    if (nextDeck.slides[wrap(rest, nextDeck.slides.length)] === current) rest++
+
+    const film = nextDeck.slides[wrap(rest, nextDeck.slides.length)]
+
+    setSpin({
+      film,
+      genre: nextGenre,
+      sort,
+      from,
+      rest,
+      wasFilm: current,
+      wasGenre: deck.genre,
+    })
+    // Nothing is played at the press: the first beep belongs to the first card
+    // that goes past, and the wheel will say when that is.
     setTrayOpen(false)
   }
 
-  // `land` closes over `sort`, and three seconds is long enough for that to go
-  // stale — the tray can be reopened mid-spin and re-sorted, and the timer
-  // would then land the film using the order that was in force when the key was
-  // pressed. A ref refreshed every render is what keeps the callback current
-  // without making it a dependency of the clock below.
-  const landRef = useRef(land)
-  landRef.current = land
+  // `rebuild` closes over the other two controls and the swap happens 160ms
+  // after the press, so the effect below reads the
+  // current one rather than the one that existed when the genre was picked.
+  const rebuildRef = useRef(rebuild)
+  rebuildRef.current = rebuild
 
-  // The three seconds themselves. An effect and not a `setTimeout` inside the
+  // The genre change itself: take the picture away, swap the deck under it,
+  // hand the reveal to the effect that already knows how to bring one back.
+  //
+  // `onComplete` and not `.then()`. Stopping a Framer animation settles its
+  // promise the same as finishing one does, so a `.then()` here would swap the
+  // deck on unmount — the one case this is supposed to abandon.
+  useEffect(() => {
+    if (pendingGenre === null) return
+
+    const defocus = animate(focus, 1, {
+      duration: GENRE_DEFOCUS,
+      ease: ease.inOut,
+      onComplete: () => {
+        rebuildRef.current({ genre: pendingGenre })
+        setPendingGenre(null)
+        setReveal({
+          transition: { duration: GENRE_SECONDS, ease: ease.smooth },
+        })
+      },
+    })
+
+    return () => defocus.stop()
+  }, [pendingGenre, focus])
+
+  // The four seconds themselves. An effect and not a `setTimeout` inside the
   // handler, so React owns the teardown: unmounting mid-spin — a playground
   // switch, a hot reload — clears the timer instead of landing a deck on a
   // component that is gone.
   //
   // `spin` is the only dependency, and deliberately so: it is the one thing
   // that should start or stop this clock. Anything else in the deps would
-  // restart the three seconds on an unrelated render.
+  // restart the four seconds on an unrelated render.
   useEffect(() => {
     if (!spin) return
 
     // The reels. `target` is driven directly here rather than through `index`,
     // which is the only way to get a throw this long: `index` feeds the spring,
-    // and `springWheel` would cover fourteen detents in about a second and
-    // arrive with a bounce. Animating the spring's *input* makes the spring a
-    // follower instead — it smooths the travel without setting its length.
+    // and `springWheel` alone would cover the whole distance in about a second
+    // and arrive with a bounce. Animating the spring's *input* makes the spring
+    // a follower instead — it smooths the travel without setting its length.
     //
-    // Keyframes and not an easing curve, because the timing is not this
-    // function's to invent: one keyframe per card, placed at the moment
-    // `SPIN_CROSSINGS` says that card reaches the top of the wheel. The
-    // roulette reads the same array, so every click is a card going past rather
-    // than a click that was tuned until it looked close.
+    // Two animations, because the throw and the ending are two different kinds
+    // of thing. See `SPIN_SECONDS` in the motion tokens for why.
     //
-    // `linear` between keyframes, so the wheel holds one speed per card and
-    // steps down at each — the granularity a detented wheel actually has. The
-    // spring downstream is what turns that staircase back into motion.
+    // The cruise is `linear` and nothing else: no easing at either end. Both
+    // ends are already handled by springs — `springWheel` spins the reel up
+    // from rest over its first ~0.3s, and `springThrow` takes the other end —
+    // so an ease here would be a second opinion about the same two moments.
+    // Both phases aim at the seat chosen at the press, in the wheel's own
+    // unbounded coordinates. Nothing here decides where the wheel stops; it was
+    // decided before it moved.
+    const restAt = spin.rest * WHEEL_STEP_DEG
+    const cruiseTo = restAt - SPIN_COAST_DETENTS * WHEEL_STEP_DEG
+
+    // The deck landing. The only moment in the throw where anything
+    // discontinuous happens, and it is deliberately in the *middle* — at full
+    // speed, under a blur that has just finished rising — rather than at the
+    // end under a stationary picture. From this frame on, the cards coming over
+    // the rim are the new genre's, and the answer is five cards away.
     //
-    // The table ends at 2.88s and `times` has to reach 1, so the last position
-    // is repeated: the wheel arrives, then sits still for the 120ms the ball
-    // takes to drop.
-    const degrees = target.get()
+    // The wheel is not touched here. It is mid-flight and it stays that way.
+    const arrive = () => {
+      setGenre(spin.genre)
+      setYear(ANY_YEAR)
+      setSort(spin.sort)
+      setIndex(spin.rest)
+      setCoasting(true)
+    }
+
+    // Declared before the cruise so the cleanup below can see them: the
+    // handover happens inside a callback, which may not have run yet — or may
+    // have run and left animations still going when the effect tears down.
+    let settle: AnimationPlaybackControls | undefined
+    // Whether the throw got as far as its own ending. False means it never
+    // will: reduced motion has no cruise to complete, and a genre picked
+    // mid-throw abandons one. The timer below is the net for both.
+    let handed = false
+
     const reels = reducedMotion
       ? null
-      : animate(
-          target,
-          [
-            degrees,
-            ...SPIN_CROSSINGS.map((_, i) => degrees + (i + 1) * WHEEL_STEP_DEG),
-            degrees + SPIN_CROSSINGS.length * WHEEL_STEP_DEG,
-          ],
-          {
-            duration: SPIN_SECONDS,
-            ease: 'linear',
-            times: [0, ...SPIN_CROSSINGS.map((at) => at / SPIN_SECONDS), 1],
-          },
-        )
+      : animate(target, cruiseTo, {
+          duration: SPIN_THROW,
+          ease: 'linear',
+          onComplete: () => {
+            handed = true
+            arrive()
 
-    // Out of focus just before the swap, timed to finish on the same frame the
-    // deck changes. `delay` rather than a second timer, so it cannot drift from
-    // the throw it belongs to.
+            // The coast. Velocity is passed rather than sampled: framer would
+            // infer one from the last two frames of the cruise, and a dropped
+            // frame there would quietly change how far the wheel travels —
+            // which, now that the wheel is aimed at a specific card, would
+            // change the answer. This is the speed the cruise was *asked* to
+            // hold, so the coast is the same length every time.
+            //
+            // Nothing watches this for the ending. The wheel's own arrival
+            // does, up in the change handler — Framer calls a spring finished
+            // on thresholds meant for pixel-scale values, and this one is in
+            // degrees, so `onComplete` here lands 22px and 187px/s early.
+            settle = animate(target, restAt, {
+              ...springThrow,
+              velocity: SPIN_CRUISE_RATE * WHEEL_STEP_DEG,
+            })
+
+            // The blur leaves on the same spring the wheel arrives on, so the
+            // card comes into focus at the rate it eases into place. See
+            // `SPIN_FOCUS_RATE`.
+            setReveal({
+              transition: { ...springThrow, velocity: SPIN_FOCUS_RATE },
+            })
+          },
+        })
+
+    // Out of focus into the handover, timed to finish on the frame the deck
+    // changes. `delay` rather than a second timer, so it cannot drift from the
+    // throw it belongs to.
     const defocus = reducedMotion
       ? null
       : animate(focus, 1, {
           duration: LANDING_DEFOCUS,
-          delay: SPIN_SECONDS - LANDING_DEFOCUS,
+          delay: SPIN_THROW - LANDING_DEFOCUS,
           ease: ease.inOut,
         })
 
+    // The net, for the throws that never reach their own ending. Reduced motion
+    // has no cruise to complete, so the deck has to land here instead; a throw
+    // abandoned by a genre pick has already had its deck replaced by the choice
+    // that abandoned it, and only needs the flag cleared. A throw that did hand
+    // over owns its ending and this stays out of the way.
     const timer = window.setTimeout(() => {
-      landRef.current(spin.genre, spin.film)
+      if (handed) return
+      if (reducedMotion) arrive()
       setSpin(null)
-      setLandings((n) => n + 1)
     }, SPIN_SECONDS * 1000)
 
     return () => {
       reels?.stop()
+      settle?.stop()
       defocus?.stop()
       window.clearTimeout(timer)
     }
   }, [spin, target, focus, reducedMotion])
 
-  // The focus pull. Its own effect and not part of the timeout above, because
-  // that timeout also clears `spin` — which re-runs that effect's cleanup in
-  // the same tick and would stop the reveal on the frame it started. Keyed on
-  // the counter instead, so the only thing that can cancel a reveal is the
-  // next one.
+  // The focus pull, shared by both things that can swap a deck. Its own effect
+  // and not part of the timeout above, because that timeout also clears `spin`
+  // — which re-runs that effect's cleanup in the same tick and would stop the
+  // reveal on the frame it started. Keyed on its own state instead, so the only
+  // thing that can cancel a reveal is the next one.
   useEffect(() => {
-    if (!landings) return
+    if (!reveal) return
     if (reducedMotion) {
       focus.jump(0)
       return
@@ -686,15 +943,16 @@ export function Move() {
     // Animated from wherever the defocus left it rather than jumped to 1 —
     // there is nothing to jump to, the picture is already gone, and a jump
     // would be the one hard edge in a transition built to have none.
-    const reveal = animate(focus, 0, {
-      duration: LANDING_SECONDS,
-      ease: ease.smooth,
-    })
-    return () => reveal.stop()
-  }, [landings, focus, reducedMotion])
+    //
+    // The transition comes with the request rather than being chosen here: a
+    // genre change reveals on a curve, a shuffle reveals on the same spring its
+    // wheel is settling under.
+    const back = animate(focus, 0, reveal.transition)
+    return () => back.stop()
+  }, [reveal, focus, reducedMotion])
 
   return (
-    <MobileFrame backdrop={<PosterAmbience src={current.poster} />}>
+    <MobileFrame backdrop={<PosterAmbience src={shownFilm.poster} />}>
       {/* Carousel viewport. The entrance belongs here and not on the track:
           Framer composes its own `transform` from an animated `y`, so a track
           that both rose and translated would lose the translate — the rise
@@ -798,7 +1056,7 @@ export function Move() {
               onClick={() => setTrayOpen(true)}
               aria-haspopup="dialog"
               aria-expanded={false}
-              aria-label={`Genre: ${deck.genre}. Choose another`}
+              aria-label={`Genre: ${shownGenre}. Choose another`}
               style={{ borderRadius: 100 }}
               className="focus-visible:ring-ink/25 absolute inset-0 cursor-pointer overflow-hidden shadow-[0px_2px_20px_-0.5px_rgba(0,0,0,0.12)] outline-none focus-visible:ring-2"
             >
@@ -816,10 +1074,10 @@ export function Move() {
                 className="font-ui absolute top-[22px] left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 px-4 leading-[normal] text-ink-soft"
               >
                 <span className="truncate text-[14px] font-medium whitespace-pre">
-                  {current.name}
+                  {shownFilm.name}
                 </span>
                 <span className="truncate text-center text-[24px] font-medium">
-                  {deck.genre}
+                  {shownGenre}
                 </span>
               </motion.div>
             </motion.button>
@@ -873,7 +1131,7 @@ export function Move() {
         />
       )}
 
-      <SpinBeam active={spinning} />
+      <SpinBeam active={spinning && !coasting} />
     </MobileFrame>
   )
 }
