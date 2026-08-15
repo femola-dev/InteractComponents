@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   AnimatePresence,
+  animate,
   motion,
   useMotionValue,
   useMotionValueEvent,
@@ -12,11 +13,14 @@ import {
 import type { MotionValue, Transition } from 'framer-motion'
 import { useSequence, useSound } from '@web-kits/audio/react'
 import { MiddleTruncate } from '../components/MiddleTruncate'
-import { MobileFrame } from '../components/MobileFrame'
+import { MobileFrame, SCREEN_RADIUS } from '../components/MobileFrame'
 import { useRise } from '../components/rise'
 import { FILMS } from '../lib/films'
 import type { Detail, Slide } from '../lib/films'
 import {
+  SPIN_CROSSINGS,
+  SPIN_SECONDS,
+  ease,
   pressable,
   springMorph,
   springResponsive,
@@ -44,7 +48,7 @@ import iconRockingHorse from '../assets/icons/IconRockingHorse.svg'
 import iconEmojiLol from '../assets/icons/IconEmojiLol.svg'
 import iconAudio from '../assets/icons/IconAudio.svg'
 import iconMouth from '../assets/icons/IconMouth.svg'
-import iconRobot from '../assets/icons/IconRobot3.svg'
+import iconCuteRobot from '../assets/icons/IconCuteRobot.svg'
 import iconVolleyball from '../assets/icons/IconVolleyball.svg'
 
 /** Panel width and the gap between panels, from the design's 40/660 offsets. */
@@ -95,6 +99,36 @@ const SEAT_SCALE = 0.874
 /** The panel's corner. Bottom always; top only once it's off the fold. */
 const PANEL_RADIUS = 30
 
+/**
+ * The reveal when a shuffle lands — a focus pull, not a cut.
+ *
+ * The deck has to change in one frame: the film comes from a genre the wheel
+ * was never spinning through, so there is nothing to travel past and `land`
+ * can only jump. What makes that jump invisible is that it happens while the
+ * carousel is 22px out of focus and a step short of full size, so the frame it
+ * lands on is one nobody can read.
+ *
+ * Two phases, and the order is the whole point. The blur goes *up* over the
+ * last 250ms of the spin, while the wheel is still coasting into its final
+ * detent — so by the time the swap happens the picture is already gone, and
+ * the last card the reels showed is never seen to be the wrong one. Then it
+ * comes back over 0.7s: the lens finding the new film rather than a card being
+ * dealt.
+ *
+ * Raising the blur before the swap rather than at it is not a refinement, it is
+ * the only order that works. `useEffect` runs after paint, so a blur applied on
+ * landing would arrive a frame late — one frame of the new poster, fully sharp,
+ * which is exactly the cut this exists to hide.
+ *
+ * The 0.7s back is longer than the beam takes to lift (0.45s) on purpose. The
+ * lights come up first and the picture sharpens after, which is the order those
+ * two things happen in a room.
+ */
+const LANDING_BLUR = 22
+const LANDING_SWELL = 0.04
+const LANDING_DEFOCUS = 0.25
+const LANDING_SECONDS = 0.7
+
 /** Ties the pill and the tray together as one morphing surface. */
 const GENRE_SURFACE = 'genre-surface'
 
@@ -109,33 +143,34 @@ const GENRE_SURFACE = 'genre-surface'
 const GLASS_WHITE = '252,250,246'
 
 /**
- * One hue per glyph.
+ * Every glyph that sits inside something you can press. Black, as the design
+ * draws them.
  *
- * The design draws every icon in black, which is correct and completely mute:
- * seven genre rows in the tray are seven identical black marks, and the panel's
- * three meta chips say year, runtime and rating in exactly the same voice. So
- * each glyph takes a colour of its own, and the colour does the sorting the
- * shapes were being asked to do alone.
+ * Colour on a control competes with the control: a 48px blue triangle on the
+ * carousel key reads as a state — as though the arrow itself meant something —
+ * when all it is is the direction you are about to travel. Black says *button*
+ * and gets out of the way, which is what leaves the colour below free to mean
+ * something.
+ */
+const ICON = '#000000'
+
+/**
+ * The panel's meta chips — the last place a glyph still carries colour.
  *
- * These are all mid-tone and desaturated a little off pure — nothing here is a
- * primary. A saturated icon set on a screen that is mostly film poster stops
- * being playful and starts being a toolbar, and the panel's chips have to sit
- * over a photograph without competing with it.
+ * Not controls: they are three facts in a linked strip, and the hue is what
+ * separates year from runtime from rating faster than the shapes do. Every
+ * other coloured surface on the screen now takes its value from the design —
+ * the genre tiles from their own table, the selection washes from its
+ * `rgba(85,85,85,·)` grey.
  *
- * Kept as one table rather than scattered at the call sites so the set can be
- * read — and re-balanced — as a set.
+ * Mid-tone and a little off pure, unlike the tiles: these sit over a photograph
+ * rather than over frosted glass, and have to stay legible against whatever the
+ * poster puts behind them.
  */
 const HUE = {
-  arrow: '#3b63c4',
   calendar: '#2e9457',
   clock: '#7b5bd6',
   review: '#e0a400',
-  ticket: '#e0503a',
-  dice: '#e0503a',
-  filter: '#1b8b9e',
-  check: '#2e9457',
-  /** The year chip's disclosure caret — an affordance, not a subject. */
-  chevron: '#8a8178',
 } as const
 
 type Deck = {
@@ -162,22 +197,12 @@ type SortKey = 'featured' | 'rating' | 'newest' | 'oldest' | 'runtime'
  * `featured` is the library's own order, kept as the default so the tray opens
  * on the deck the design ships rather than on a sorted view of it.
  */
-const SORT_MENU: { key: SortKey; label: string; icon: string; hue: string }[] = [
-  { key: 'featured', label: 'Featured', icon: iconFilter, hue: HUE.filter },
-  { key: 'rating', label: 'Top rated', icon: iconReview, hue: HUE.review },
-  {
-    key: 'newest',
-    label: 'Newest first',
-    icon: iconFilterDescending,
-    hue: HUE.arrow,
-  },
-  {
-    key: 'oldest',
-    label: 'Oldest first',
-    icon: iconFilterAscending,
-    hue: HUE.clock,
-  },
-  { key: 'runtime', label: 'Longest first', icon: iconClock, hue: HUE.check },
+const SORT_MENU: { key: SortKey; label: string; icon: string }[] = [
+  { key: 'featured', label: 'Featured', icon: iconFilter },
+  { key: 'rating', label: 'Top rated', icon: iconReview },
+  { key: 'newest', label: 'Newest first', icon: iconFilterDescending },
+  { key: 'oldest', label: 'Oldest first', icon: iconFilterAscending },
+  { key: 'runtime', label: 'Longest first', icon: iconClock },
 ]
 
 /** "1h 39m" → 99. Either part can be missing, so both are read on their own. */
@@ -241,42 +266,50 @@ const yearsIn = (genre: string) =>
 
 /**
  * The tray's menu — the design's seven genres, in its order, each with its own
- * glyph. Fixed rather than derived from `FILMS`: the design is a standing menu
- * of what the app offers, not a report of what happens to be loaded, so a genre
- * keeps its row whether or not anything currently fills it.
+ * glyph and its own tile. Fixed rather than derived from `FILMS`: the design is
+ * a standing menu of what the app offers, not a report of what happens to be
+ * loaded, so a genre keeps its row whether or not anything currently fills it.
  *
  * Every row is filled — the library carries 35 to 40 films for each — but a
  * year filter can empty one, so the tray keeps its `available` guard rather
  * than assuming stock.
- */
-/**
- * A hue and a tile for each, running warm to cool down the list.
  *
- * The order is the design's and is not sorted by colour — but it happens to
- * fall vermilion, amber, mustard, violet, pink, teal, green, which reads as a
- * deliberate ramp rather than as seven arbitrary swatches. Each `tint` is its
- * own `hue` lifted to around 92% white: the tile is the glyph's own colour at
- * the strength a 24px square can carry without becoming a button.
+ * The tiles are straight off node 257:407, and they are nothing like the muted
+ * set that stood here before. These are near-fluorescent: pure red, periwinkle,
+ * lime, cyan. On a 24px square over frosted glass that reads as a sticker
+ * rather than as a warning, which is the whole trick.
+ *
+ * `glyph` is the second half of it and the part that is easy to miss. The mark
+ * is not black — it is its own tile pushed to about 15% lightness, so the sword
+ * on red is `#400404` and the robot on lime is `#202700`. A black glyph on a
+ * saturated tile always reads as a hole punched in it; a very dark version of
+ * the same hue reads as the same object in shadow, and the tile stays whole.
+ *
+ * Sci-Fi takes `IconCuteRobot` here rather than `IconRobot3` — the design
+ * swapped the glyph along with the colour.
  */
 const GENRE_MENU: {
   genre: string
   icon: string
-  hue: string
-  tint: string
+  tile: string
+  glyph: string
 }[] = [
-  { genre: 'Action', icon: iconSword, hue: '#e0503a', tint: '#fbe3de' },
+  { genre: 'Action', icon: iconSword, tile: '#ff2f2f', glyph: '#400404' },
   {
     genre: 'Animation',
     icon: iconRockingHorse,
-    hue: '#e08a1e',
-    tint: '#fceed8',
+    tile: '#8282fe',
+    glyph: '#00008c',
   },
-  { genre: 'Comedy', icon: iconEmojiLol, hue: '#c99a00', tint: '#f9f1cf' },
-  { genre: 'Musical', icon: iconAudio, hue: '#7b5bd6', tint: '#ebe5fb' },
-  { genre: 'Romance', icon: iconMouth, hue: '#d9438c', tint: '#fbe1ee' },
-  { genre: 'Sci-Fi', icon: iconRobot, hue: '#1b8b9e', tint: '#d9eff3' },
-  { genre: 'Sport', icon: iconVolleyball, hue: '#2e9457', tint: '#dcf1e3' },
+  { genre: 'Comedy', icon: iconEmojiLol, tile: '#fbd350', glyph: '#322805' },
+  { genre: 'Musical', icon: iconAudio, tile: '#49ff49', glyph: '#1d421d' },
+  { genre: 'Romance', icon: iconMouth, tile: '#ff3f85', glyph: '#4c0f25' },
+  { genre: 'Sci-Fi', icon: iconCuteRobot, tile: '#d9ff31', glyph: '#202700' },
+  { genre: 'Sport', icon: iconVolleyball, tile: '#43fff5', glyph: '#000505' },
 ]
+
+/** A shuffle in flight, decided at the press and held until the timer fires. */
+type Spin = { film: Slide; genre: string }
 
 /** The design opens on the filled panel, with a sliver of each neighbour. */
 const START_INDEX = 1
@@ -327,6 +360,15 @@ export function Move() {
 
   const [index, setIndex] = useState(START_INDEX)
   const [trayOpen, setTrayOpen] = useState(false)
+  // A shuffle in flight: the film it has already chosen, the genre it will
+  // surface under, and that genre's colour for the beam. `null` when the
+  // carousel is at rest, which is also what every guard reads.
+  const [spin, setSpin] = useState<Spin | null>(null)
+  const spinning = spin !== null
+  // Bumped once per landing. A counter and not a boolean, because two shuffles
+  // in a row have to be two separate reveals — a flag would already be `true`
+  // the second time and the effect below would never re-run.
+  const [landings, setLandings] = useState(0)
   const rise = useRise()
   const reducedMotion = useReducedMotion()
 
@@ -382,6 +424,18 @@ export function Move() {
   // arcing panels. Below, not above, so the wheel is convex and the neighbours
   // fall away under the rim the way numbers do on a roulette.
   const origin = `50% calc(50% + ${wheelRadius(pitch)}px)`
+
+  // How far out of focus the carousel is: 0 sharp, 1 fully thrown. One value
+  // driving both the blur and the scale, so the two cannot come apart, and a
+  // `MotionValue` rather than state so the reveal never costs a render.
+  const focus = useMotionValue(0)
+  // `none` and not `blur(0px)` at rest. A filter — even a zero one — puts the
+  // whole carousel on its own composited layer and keeps it there; this hands
+  // the layer back the moment the reveal is done.
+  const focusBlur = useTransform(focus, (f) =>
+    f < 0.001 ? 'none' : `blur(${(f * LANDING_BLUR).toFixed(2)}px)`,
+  )
+  const focusScale = useTransform(focus, (f) => 1 - LANDING_SWELL * f)
 
   // The wheel's true state, in degrees. A `useSpring` and not an `animate`
   // target: the spring integrates one continuous position, so a press that
@@ -471,31 +525,173 @@ export function Move() {
     setTrayOpen(false)
   }
 
-  // Shuffle stays inside the current deck — the tray is a genre menu, so the
-  // die is "another film in this genre", not "any film at all". Rerolls until
-  // it lands somewhere new, so a shuffle never looks like a dead button.
+  // Land the wheel on one specific film, in whatever deck holds it. The sibling
+  // of `rebuild`: same jump, same velocity clear, but it aims at a film rather
+  // than at the deck's opening slot.
+  //
+  // The year filter is dropped rather than carried. Shuffle now reaches the
+  // whole library, and a film picked from all forty has no reason to satisfy a
+  // year the last genre happened to be filtered by — keeping it would build a
+  // deck the result isn't in. The sort survives, because it is an ordering
+  // preference rather than a narrowing of what exists.
+  const land = (nextGenre: string, film: Slide) => {
+    const nextDeck = buildDeck(nextGenre, ANY_YEAR, sort)
+    // `buildDeck` filters `FILMS`, so the deck holds the same objects the pick
+    // came from and identity is enough. The fallback is unreachable given the
+    // genre came off the film itself, and is here so a future change to either
+    // can't strand the wheel on a negative index.
+    const found = nextDeck.slides.indexOf(film)
+    const nextIndex = found >= 0 ? found : openingIndex(nextDeck)
+
+    setGenre(nextGenre)
+    setYear(ANY_YEAR)
+    setIndex(nextIndex)
+    setRim(nextIndex)
+
+    const degrees = nextIndex * WHEEL_STEP_DEG
+    target.jump(degrees)
+    spring.jump(degrees)
+  }
+
+  // Shuffle reaches the whole library, not the deck in front of it.
+  //
+  // It used to be "another film in this genre", which made it a second way of
+  // pressing Next. Now it is the one control that ignores every other control
+  // — a film from any genre, and the tray follows the result rather than
+  // bounding it. Which also means the genre on the pill is an *outcome* of a
+  // shuffle, not an input to it.
+  //
+  // The result is chosen up front and held for three seconds rather than
+  // decided when the timer fires. That is what lets the beam know which colour
+  // it is settling into before it gets there, and it keeps the whole spin
+  // deterministic once it has started: what lands is fixed at the press.
   const shuffle = () => {
-    if (count > 1) {
-      const here = wrap(index, count)
-      let next = here
-      while (next === here) next = Math.floor(Math.random() * count)
-      // Move by a delta rather than assigning, so a looping deck keeps its
-      // unbounded index. Now that the travel is visible as rotation, the delta
-      // is folded onto the short arc: a plain `next - here` would spin a
-      // forty-film deck 39 detents forward to reach the card one step back.
-      let delta = next - here
-      if (looping) {
-        if (delta > count / 2) delta -= count
-        else if (delta < -count / 2) delta += count
-      }
-      setIndex((i) => i + delta)
+    // A second press mid-spin is ignored rather than queued. Restarting would
+    // desynchronise the beam and the sequence from the timer that is already
+    // running, and there is nothing useful for a re-roll to mean while the
+    // first one is still deciding.
+    if (spinning) return
+
+    // Rerolls until it lands somewhere new, so a shuffle never looks like a
+    // dead button.
+    let film = current
+    while (film === current) {
+      film = FILMS[Math.floor(Math.random() * FILMS.length)]
     }
+    // A film sits in several of the menu's rows; the pill can only show one, so
+    // the genre is drawn from its own list rather than assumed. Random and not
+    // `[0]`, so the same film arriving twice can still surface under a
+    // different heading.
+    const nextGenre =
+      film.genres[Math.floor(Math.random() * film.genres.length)]
+
+    setSpin({ film, genre: nextGenre })
     // Fires either way. A one-film deck has nowhere to shuffle to, but the key
     // was still pressed, and silence there reads as a broken button rather
     // than as an empty deck.
     playSpin()
     setTrayOpen(false)
   }
+
+  // `land` closes over `sort`, and three seconds is long enough for that to go
+  // stale — the tray can be reopened mid-spin and re-sorted, and the timer
+  // would then land the film using the order that was in force when the key was
+  // pressed. A ref refreshed every render is what keeps the callback current
+  // without making it a dependency of the clock below.
+  const landRef = useRef(land)
+  landRef.current = land
+
+  // The three seconds themselves. An effect and not a `setTimeout` inside the
+  // handler, so React owns the teardown: unmounting mid-spin — a playground
+  // switch, a hot reload — clears the timer instead of landing a deck on a
+  // component that is gone.
+  //
+  // `spin` is the only dependency, and deliberately so: it is the one thing
+  // that should start or stop this clock. Anything else in the deps would
+  // restart the three seconds on an unrelated render.
+  useEffect(() => {
+    if (!spin) return
+
+    // The reels. `target` is driven directly here rather than through `index`,
+    // which is the only way to get a throw this long: `index` feeds the spring,
+    // and `springWheel` would cover fourteen detents in about a second and
+    // arrive with a bounce. Animating the spring's *input* makes the spring a
+    // follower instead — it smooths the travel without setting its length.
+    //
+    // Keyframes and not an easing curve, because the timing is not this
+    // function's to invent: one keyframe per card, placed at the moment
+    // `SPIN_CROSSINGS` says that card reaches the top of the wheel. The
+    // roulette reads the same array, so every click is a card going past rather
+    // than a click that was tuned until it looked close.
+    //
+    // `linear` between keyframes, so the wheel holds one speed per card and
+    // steps down at each — the granularity a detented wheel actually has. The
+    // spring downstream is what turns that staircase back into motion.
+    //
+    // The table ends at 2.88s and `times` has to reach 1, so the last position
+    // is repeated: the wheel arrives, then sits still for the 120ms the ball
+    // takes to drop.
+    const degrees = target.get()
+    const reels = reducedMotion
+      ? null
+      : animate(
+          target,
+          [
+            degrees,
+            ...SPIN_CROSSINGS.map((_, i) => degrees + (i + 1) * WHEEL_STEP_DEG),
+            degrees + SPIN_CROSSINGS.length * WHEEL_STEP_DEG,
+          ],
+          {
+            duration: SPIN_SECONDS,
+            ease: 'linear',
+            times: [0, ...SPIN_CROSSINGS.map((at) => at / SPIN_SECONDS), 1],
+          },
+        )
+
+    // Out of focus just before the swap, timed to finish on the same frame the
+    // deck changes. `delay` rather than a second timer, so it cannot drift from
+    // the throw it belongs to.
+    const defocus = reducedMotion
+      ? null
+      : animate(focus, 1, {
+          duration: LANDING_DEFOCUS,
+          delay: SPIN_SECONDS - LANDING_DEFOCUS,
+          ease: ease.inOut,
+        })
+
+    const timer = window.setTimeout(() => {
+      landRef.current(spin.genre, spin.film)
+      setSpin(null)
+      setLandings((n) => n + 1)
+    }, SPIN_SECONDS * 1000)
+
+    return () => {
+      reels?.stop()
+      defocus?.stop()
+      window.clearTimeout(timer)
+    }
+  }, [spin, target, focus, reducedMotion])
+
+  // The focus pull. Its own effect and not part of the timeout above, because
+  // that timeout also clears `spin` — which re-runs that effect's cleanup in
+  // the same tick and would stop the reveal on the frame it started. Keyed on
+  // the counter instead, so the only thing that can cancel a reveal is the
+  // next one.
+  useEffect(() => {
+    if (!landings) return
+    if (reducedMotion) {
+      focus.jump(0)
+      return
+    }
+    // Animated from wherever the defocus left it rather than jumped to 1 —
+    // there is nothing to jump to, the picture is already gone, and a jump
+    // would be the one hard edge in a transition built to have none.
+    const reveal = animate(focus, 0, {
+      duration: LANDING_SECONDS,
+      ease: ease.smooth,
+    })
+    return () => reveal.stop()
+  }, [landings, focus, reducedMotion])
 
   return (
     <MobileFrame backdrop={<PosterAmbience src={current.poster} />}>
@@ -514,50 +710,65 @@ export function Move() {
           also why the whole carousel animates as a single composited transform
           however many cards are mounted. */}
       <motion.div {...rise(0.12)} className="relative min-h-0 flex-1">
-        <div
-          ref={viewport}
-          className="absolute inset-y-0 left-[40px] w-[calc(100%-80px)]"
+        {/* A layer of its own for the reveal, rather than folding the blur and
+            the scale onto the rise above or the wheel below. Both of those
+            already own a transform, and Framer composes one `transform` per
+            element — a second owner silently wins and the first stops moving.
+
+            Coincident with the box it sits in, which matters more than it
+            looks: `filter` makes an element the containing block for its
+            absolute descendants, so the viewport's frame of reference changes
+            the instant the blur turns on. Identical boxes mean it cannot
+            shift. */}
+        <motion.div
+          className="absolute inset-0"
+          style={{ filter: focusBlur, scale: focusScale }}
         >
-          <motion.div
-            className="absolute inset-0"
-            style={{ rotate, transformOrigin: origin }}
+          <div
+            ref={viewport}
+            className="absolute inset-y-0 left-[40px] w-[calc(100%-80px)]"
           >
-            {panels.map(({ virtual, slide }) => (
-              <div
-                // Keyed by the unbounded index, so a card keeps its identity —
-                // and therefore its seat on the wheel — as the rim moves past.
-                key={virtual}
-                className="absolute inset-0"
-                // Static: a card's seat never changes. The rotation the eye
-                // sees is the wheel's, and it composes with this one because
-                // both turn about the same pivot.
-                //
-                // Stacked by distance from the top of the wheel. A card this
-                // tall cannot tilt without its lower inner corner swinging
-                // inside its neighbour — 600×888 boxes 20px apart collide past
-                // about 2.6° of rotation, so there is no step angle worth
-                // having that avoids it. Ordering them is the fix rather than
-                // the workaround: the near card passes in front, the overlap
-                // reads as the fan of a rim seen edge-on, and what would have
-                // been a corner clipping through becomes depth.
-                style={{
-                  transform: `rotate(${virtual * WHEEL_STEP_DEG}deg)`,
-                  transformOrigin: origin,
-                  zIndex: WINDOW - Math.abs(virtual - rim),
-                }}
-              >
-                {/* The settled card owns the reading order, not whichever one
+            <motion.div
+              className="absolute inset-0"
+              style={{ rotate, transformOrigin: origin }}
+            >
+              {panels.map(({ virtual, slide }) => (
+                <div
+                  // Keyed by the unbounded index, so a card keeps its identity —
+                  // and therefore its seat on the wheel — as the rim moves past.
+                  key={virtual}
+                  className="absolute inset-0"
+                  // Static: a card's seat never changes. The rotation the eye
+                  // sees is the wheel's, and it composes with this one because
+                  // both turn about the same pivot.
+                  //
+                  // Stacked by distance from the top of the wheel. A card this
+                  // tall cannot tilt without its lower inner corner swinging
+                  // inside its neighbour — 600×888 boxes 20px apart collide past
+                  // about 2.6° of rotation, so there is no step angle worth
+                  // having that avoids it. Ordering them is the fix rather than
+                  // the workaround: the near card passes in front, the overlap
+                  // reads as the fan of a rim seen edge-on, and what would have
+                  // been a corner clipping through becomes depth.
+                  style={{
+                    transform: `rotate(${virtual * WHEEL_STEP_DEG}deg)`,
+                    transformOrigin: origin,
+                    zIndex: WINDOW - Math.abs(virtual - rim),
+                  }}
+                >
+                  {/* The settled card owns the reading order, not whichever one
                     happens to be passing the top of the wheel mid-spin. */}
-                <Panel
-                  slide={slide}
-                  wheel={wheel}
-                  virtual={virtual}
-                  hidden={virtual !== index}
-                />
-              </div>
-            ))}
-          </motion.div>
-        </div>
+                  <Panel
+                    slide={slide}
+                    wheel={wheel}
+                    virtual={virtual}
+                    hidden={virtual !== index}
+                  />
+                </div>
+              ))}
+            </motion.div>
+          </div>
+        </motion.div>
       </motion.div>
 
       {/* Control bar — 96px keys flush to each end of a 24px gutter, with no
@@ -569,7 +780,7 @@ export function Move() {
         <ControlKey
           label="Previous"
           icon={iconArrowTriangleLeft}
-          disabled={atStart}
+          disabled={atStart || spinning}
           onClick={() => {
             playBack()
             setIndex((i) => (looping ? i - 1 : Math.max(0, i - 1)))
@@ -618,7 +829,7 @@ export function Move() {
         <ControlKey
           label="Next"
           icon={iconArrowTriangleRight}
-          disabled={atEnd}
+          disabled={atEnd || spinning}
           onClick={() => {
             playForward()
             setIndex((i) => (looping ? i + 1 : Math.min(count - 1, i + 1)))
@@ -661,6 +872,8 @@ export function Move() {
           onClose={() => setTrayOpen(false)}
         />
       )}
+
+      <SpinBeam active={spinning} />
     </MobileFrame>
   )
 }
@@ -699,7 +912,6 @@ function GenreTray({
   onClose: () => void
 }) {
   const [menu, setMenu] = useState<'year' | 'sort' | null>(null)
-
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -809,14 +1021,13 @@ function GenreTray({
               {filtered && (
                 <span
                   aria-hidden="true"
-                  className="absolute inset-0 rounded-[25px]"
-                  style={{ backgroundColor: `${HUE.calendar}24` }}
+                  className="absolute inset-0 rounded-[25px] bg-[rgba(85,85,85,0.12)]"
                 />
               )}
               <span className="relative flex items-center gap-1">
                 <Glyph
                   src={iconCalendar}
-                  tint={HUE.calendar}
+                  tint={ICON}
                   className="size-4 shrink-0"
                 />
                 <span
@@ -838,7 +1049,7 @@ function GenreTray({
               >
                 <Glyph
                   src={iconChevronTriangleDown}
-                  tint={HUE.chevron}
+                  tint={ICON}
                   className="size-4"
                 />
               </motion.span>
@@ -853,14 +1064,10 @@ function GenreTray({
               className="focus-visible:ring-ink/25 relative grid size-8 shrink-0 cursor-pointer place-items-center rounded-[25px] shadow-[0px_0.5px_5px_0px_rgba(0,0,0,0.12)] outline-none focus-visible:ring-2"
             >
               <Glass radius="25px" />
-              {/* The wash takes the chosen sort's own colour, so the key and
-                  the glyph it is showing agree — the same trick the genre rows
-                  play, one level up. */}
               {sorted && (
                 <span
                   aria-hidden="true"
-                  className="absolute inset-0 rounded-[25px]"
-                  style={{ backgroundColor: `${activeSort.hue}24` }}
+                  className="absolute inset-0 rounded-[25px] bg-[rgba(85,85,85,0.12)]"
                 />
               )}
               {/* The key keeps the design's glyph while the order is the house
@@ -868,7 +1075,7 @@ function GenreTray({
                   the same key, reading back the choice it holds. */}
               <Glyph
                 src={sorted ? activeSort.icon : iconFilterCircle}
-                tint={sorted ? activeSort.hue : HUE.filter}
+                tint={ICON}
                 className="relative size-4"
               />
             </button>
@@ -904,7 +1111,6 @@ function GenreTray({
                     <MenuRow
                       key={entry.key}
                       icon={entry.icon}
-                      hue={entry.hue}
                       label={entry.label}
                       selected={entry.key === sort}
                       onClick={() => {
@@ -933,7 +1139,7 @@ function GenreTray({
 
         <div className="flex w-full shrink-0 flex-col items-center gap-3">
           <div className="flex w-full flex-col gap-[2px]">
-            {GENRE_MENU.map(({ genre: row, icon, hue, tint }) => {
+            {GENRE_MENU.map(({ genre: row, icon, tile, glyph }) => {
               const isActive = row === genre
               // The menu is fixed but what is behind a row is not: with a year
               // in force a genre can hold nothing. It still shows — the
@@ -949,16 +1155,16 @@ function GenreTray({
                   disabled={!available}
                   onClick={() => onChooseGenre(row)}
                   aria-current={isActive}
-                  // The selected row is washed in its own genre's colour
-                  // rather than the neutral grey the design used — `1f` is
-                  // hex alpha, about 12%, which is as far as a hue can go
-                  // behind 16px text before it starts competing with it.
-                  // Hover stays grey on purpose: the colour means *chosen*,
-                  // and a pointer passing over a row has not chosen anything.
-                  style={isActive ? { backgroundColor: `${hue}1f` } : undefined}
+                  // The design's one row wash, at its exact value, for both
+                  // states. Colour lives in the tile now — a second tinted
+                  // surface behind it only muddied the one that was doing the
+                  // identifying, and a neutral grey lets seven very loud tiles
+                  // sit in a list without the list itself joining in.
                   className={`focus-visible:ring-ink/25 relative flex h-[40px] w-full items-center gap-3 rounded-[10px] pr-3 pl-2 text-left outline-none focus-visible:ring-2 ${
+                    isActive ? 'bg-[rgba(85,85,85,0.1)]' : ''
+                  } ${
                     available
-                      ? 'cursor-pointer hover:bg-[rgba(85,85,85,0.06)]'
+                      ? 'cursor-pointer hover:bg-[rgba(85,85,85,0.1)]'
                       : 'cursor-default opacity-35'
                   }`}
                 >
@@ -970,9 +1176,9 @@ function GenreTray({
                       the 10px row. */}
                   <span
                     className="grid size-6 shrink-0 place-items-center rounded-[4px]"
-                    style={{ backgroundColor: tint }}
+                    style={{ backgroundColor: tile }}
                   >
-                    <Glyph src={icon} tint={hue} className="size-4" />
+                    <Glyph src={icon} tint={glyph} className="size-4" />
                   </span>
                   {/* 16px here against the panel chips' 14px — the tray is the
                       one surface you read at arm's length rather than glance
@@ -980,13 +1186,10 @@ function GenreTray({
                   <span className="font-body text-[16px] leading-6 font-medium tracking-[-0.144px] whitespace-nowrap text-ink-soft">
                     {row}
                   </span>
-                  {/* The tick takes the row's own hue, so the answer to
-                      "which genre is on?" is the same colour in the list as it
-                      is on the tile. */}
                   {isActive && (
                     <Glyph
                       src={iconCheckmark}
-                      tint={hue}
+                      tint={ICON}
                       className="ml-auto size-5 shrink-0"
                     />
                   )}
@@ -1006,8 +1209,13 @@ function GenreTray({
             whileTap={pressable.whileTap}
             transition={springResponsive}
           >
-            <Glyph src={iconDice} tint={HUE.dice} className="size-4 shrink-0" />
-            <span className="font-body text-[14px] leading-4 font-medium tracking-[-0.126px] whitespace-nowrap text-ink-soft">
+            <Glyph src={iconDice} tint={ICON} className="size-4 shrink-0" />
+            {/* Black, not the warm near-black the rest of the tray reads in.
+                The design sets this label to pure black, and on the one opaque
+                grey capsule on the screen it is the only place that difference
+                is visible — everywhere else the copy sits on frosted white,
+                where warm black is what keeps it from looking printed on. */}
+            <span className="font-body text-[14px] leading-4 font-medium tracking-[-0.126px] whitespace-nowrap text-black">
               Shuffle
             </span>
           </motion.button>
@@ -1068,14 +1276,11 @@ function FilterMenu({
  *  genre rows — this is a refinement of the choice below it, not a peer. */
 function MenuRow({
   icon,
-  hue,
   label,
   selected,
   onClick,
 }: {
   icon?: string
-  /** Only meaningful alongside `icon`; the year menu's rows carry neither. */
-  hue?: string
   label: string
   selected: boolean
   onClick: () => void
@@ -1090,9 +1295,7 @@ function MenuRow({
         selected ? 'bg-[rgba(85,85,85,0.1)]' : 'hover:bg-[rgba(85,85,85,0.06)]'
       }`}
     >
-      {icon && (
-        <Glyph src={icon} tint={hue ?? HUE.filter} className="size-4 shrink-0" />
-      )}
+      {icon && <Glyph src={icon} tint={ICON} className="size-4 shrink-0" />}
       <span className="font-body text-[14px] leading-5 tracking-[-0.126px] whitespace-nowrap text-ink-soft">
         {label}
       </span>
@@ -1100,7 +1303,7 @@ function MenuRow({
           menu's width once and picking a different row doesn't resize it. */}
       <span className="ml-auto flex size-4 shrink-0 pl-2">
         {selected && (
-          <Glyph src={iconCheckmark} tint={HUE.check} className="size-4" />
+          <Glyph src={iconCheckmark} tint={ICON} className="size-4" />
         )}
       </span>
     </button>
@@ -1159,6 +1362,164 @@ function Glass({
         }}
       />
     </div>
+  )
+}
+
+/**
+ * The screen while a shuffle is deciding: the picture dimmed, and every colour
+ * the library has burning up three of its edges.
+ *
+ * Light bled in from the rim rather than a spinner dropped in the middle: the
+ * whole device is busy, so the whole device says so, and the carousel spinning
+ * underneath stays part of the picture instead of being covered by a widget.
+ * The dim is what buys the beam its prominence — against a lit poster the rim
+ * light was just a tint on the bezel, and at 60% black it becomes the brightest
+ * thing on the screen without hiding the reels behind it.
+ *
+ * Three edges and not four. The device's top is above the fold — the card is
+ * cropped by it rather than ending at it — so a band across the top drew a
+ * hard lid on a frame that is meant to run off the screen. Left, right and
+ * bottom trace the edges the phone actually has here, and the sides fade out
+ * as they climb rather than stopping at a line.
+ */
+const BEAM_HUES = GENRE_MENU.map((row) => row.tile)
+
+/** How far into the screen the light reaches. */
+const RING_WIDTH = 16
+
+/**
+ * The glow that turns the band into light, and the reason it can be this soft.
+ *
+ * Nearly as wide as the band itself. At that ratio the blur is doing more than
+ * feathering an edge — it is also what smooths the conic's colour stops into
+ * each other, since seven hues around a rim meet at seven hard seams and a
+ * gradient this saturated shows every one of them. Widening the blur is the
+ * cheapest easing there is: it acts on the finished band, so the colours blend
+ * and the edges soften from the same operation.
+ */
+const RING_GLOW = 14
+
+/**
+ * The rim, as a conic gradient clipped to a band.
+ *
+ * This replaces a set of seven inset shadows, and it had to: a shadow can only
+ * put one colour at one edge by *offsetting* it, so seven distinguishable
+ * colours meant seven offsets of 50-odd pixels, and the light reached that far
+ * inward by construction. There was no narrow version of that recipe at all —
+ * shrink the offsets and all seven lights land on top of each other and average
+ * into grey.
+ *
+ * A conic gradient has no such coupling. It carries the whole palette around
+ * the perimeter at once, so the band can be any thickness independent of how
+ * many colours are in it. The extra hue on the end is the first one repeated,
+ * closing the loop — without it the wheel has a seam at twelve o'clock where
+ * cyan meets red.
+ */
+const RING_GRADIENT = `conic-gradient(from 0deg, ${[
+  ...BEAM_HUES,
+  BEAM_HUES[0],
+].join(', ')})`
+
+/**
+ * Both edges of the band follow the device's corner, which is the whole reason
+ * for the transparent border rather than the more common `content-box` mask.
+ * A content box is always square-cornered, so the inner edge of the ring would
+ * cut a hard 90° notch across a 52px radius. A padding box inherits the corner
+ * minus the border width, so the band holds its width the whole way round.
+ *
+ * `exclude` keeps what the outer shape has and the inner one does not — the
+ * band — and leaves the middle transparent, so the reels still read through it.
+ */
+const RING_MASK =
+  'linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0)'
+
+/**
+ * The vertical falloff — the sides at full strength along the bottom, easing
+ * out as they climb towards the fold.
+ *
+ * `rampMask` measures up from the bottom, so this is opaque to 48% and gone by
+ * the top. Reusing it rather than writing a `linear-gradient` here is the whole
+ * point: it is a smoothstep, and a straight ramp on a band this saturated shows
+ * a shoulder where it begins — a second edge across the screen, which is
+ * exactly what taking the top band off was meant to avoid.
+ */
+const RING_FADE = rampMask(48, 100)
+
+function SpinBeam({ active }: { active: boolean }) {
+  const reducedMotion = useReducedMotion()
+
+  const corners = {
+    borderBottomLeftRadius: SCREEN_RADIUS,
+    borderBottomRightRadius: SCREEN_RADIUS,
+  }
+
+  return (
+    <AnimatePresence>
+      {active && (
+        <motion.div
+          key="beam"
+          aria-hidden="true"
+          // Above the carousel and the control bar, below nothing — the tray is
+          // closed by the shuffle that started this, so there is nothing left
+          // for it to sit under.
+          className="pointer-events-none absolute inset-0 z-40"
+          style={corners}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          // Slower out than in. The beam has to be gone by the time the eye
+          // reaches the new poster, but cutting it dead at the landing loses
+          // the moment the two are the same event.
+          transition={{ duration: 0.45, ease: ease.smooth }}
+        >
+          <div className="absolute inset-0 bg-black/60" style={corners} />
+
+          {/* Blur and fade both live on the wrapper, not on the band.
+              A filter is applied before a mask, so blurring the ring itself
+              would soften it and then have the mask cut the softness straight
+              back off. Out here the blur acts on the finished band — which is
+              what turns a stroke into light, and what melts the conic's seven
+              seams into one another.
+
+              The fade is `rampMask`, the same smoothstep the poster's blur ramp
+              is built from: full strength across the bottom, easing away over
+              the climb. A straight linear ramp puts a visible shoulder where it
+              starts, which on a band this saturated reads as a second edge
+              halfway up the screen. */}
+          <motion.div
+            className="absolute inset-0"
+            style={{
+              filter: `blur(${RING_GLOW}px)`,
+              maskImage: RING_FADE,
+              WebkitMaskImage: RING_FADE,
+            }}
+            animate={
+              reducedMotion ? undefined : { opacity: [0.82, 1, 0.86, 1] }
+            }
+            transition={{ duration: SPIN_SECONDS, ease: 'linear' }}
+          >
+            <div
+              className="absolute inset-0"
+              style={{
+                ...corners,
+                // No top edge. Zeroing the border there — rather than masking
+                // the band away afterwards — means the padding box reaches the
+                // top too, so the two mask layers simply never produce a band
+                // across it.
+                borderWidth: `0 ${RING_WIDTH}px ${RING_WIDTH}px`,
+                borderStyle: 'solid',
+                borderColor: 'transparent',
+                background: `${RING_GRADIENT} border-box`,
+                mask: RING_MASK,
+                maskComposite: 'exclude',
+                WebkitMask: RING_MASK,
+                WebkitMaskComposite: 'xor',
+              }}
+            />
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
@@ -1234,7 +1595,7 @@ function ControlKey({
       whileTap={disabled ? undefined : pressable.whileTap}
       transition={springResponsive}
     >
-      <Glyph src={icon} tint={HUE.arrow} className="relative size-[48px]" />
+      <Glyph src={icon} tint={ICON} className="relative size-[48px]" />
     </motion.button>
   )
 }
@@ -1473,12 +1834,7 @@ function Detail({ detail }: { detail: Detail }) {
           <span className="bg-chip -mr-[2px] size-[6px] shrink-0" />
           <Chip icon={iconClock} hue={HUE.clock} label={detail.runtime} />
           <span className="bg-chip -mr-[2px] size-[6px] shrink-0" />
-          <Chip
-            icon={iconReview}
-            hue={HUE.review}
-            label={detail.rating}
-            last
-          />
+          <Chip icon={iconReview} hue={HUE.review} label={detail.rating} last />
         </div>
 
         {/* White here, but the chips above keep their black-on-grey — the
@@ -1558,7 +1914,7 @@ function TicketButton() {
           true centre — so the icon reads as leading the text rather than the
           pair floating in the middle. */}
       <span className="relative flex -translate-x-[2px] items-center justify-center gap-2">
-        <Glyph src={iconTicket} tint={HUE.ticket} className="size-4 shrink-0" />
+        <Glyph src={iconTicket} tint={ICON} className="size-4 shrink-0" />
         <span className="font-body text-ink-soft text-[16px] leading-6 font-semibold tracking-[-0.144px] whitespace-nowrap">
           Get Ticket
         </span>

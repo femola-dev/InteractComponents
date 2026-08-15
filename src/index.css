@@ -1,8 +1,8 @@
 @import 'tailwindcss';
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/inter";
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/inter';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -193,7 +193,11 @@
      belongs to the same world they do. */
   --color-tray: #f7f4ef; /* placeholder panels, and the ticket's darken layer */
   --color-chip: #e8e3da; /* meta pills and the connectors between them */
-  --color-key: #f2e6d2; /* the tray's Shuffle key — the one solid fill in it */
+  /* The tray's Shuffle key — the one solid fill in it, and the one surface here
+     left at the design's own neutral grey. The warm cast the others take reads
+     as a tint on a large frosted pane; on a 95px opaque capsule sitting under
+     seven fluorescent tiles it just looked like a stain. */
+  --color-key: #d9d9d9;
   --color-edge: #ece7df; /* device outline and home indicator */
   /* Copy on those surfaces. Warm near-black rather than #000, and a warm grey
      for the year chip's resting label. Separate tokens and not a change to

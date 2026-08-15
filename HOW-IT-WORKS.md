@@ -1,8 +1,9 @@
 # How This Website Works
 
-A plain-English guide to the Playground app — what it is, what it's built with,
-and how every piece fits together. You don't need to be an expert to follow
-this; where something technical matters, it gets explained rather than assumed.
+A plain-English guide to the InteractComponents playground — what it is, what
+it's built with, and how every piece fits together. You don't need to be an
+expert to follow this; where something technical matters, it gets explained
+rather than assumed.
 
 ---
 
@@ -17,28 +18,30 @@ this; where something technical matters, it gets explained rather than assumed.
 7. [Page 2 — Notification Stack](#7-page-2--notification-stack)
 8. [Page 3 — Portfolio](#8-page-3--portfolio)
 9. [Page 4 — Membership Dashboard](#9-page-4--membership-dashboard)
-10. [The chart engine (dither-kit)](#10-the-chart-engine-dither-kit)
-11. [The design system: colours, fonts, spacing](#11-the-design-system-colours-fonts-spacing)
-12. [How the animations work](#12-how-the-animations-work)
-13. [Where the data comes from](#13-where-the-data-comes-from)
-14. [Responsiveness and accessibility](#14-responsiveness-and-accessibility)
-15. [Running and building the project](#15-running-and-building-the-project)
-16. [Full file map](#16-full-file-map)
-17. [How to add a new page](#17-how-to-add-a-new-page)
+10. [Page 5 — Move](#10-page-5--move)
+11. [The chart engine (dither-kit)](#11-the-chart-engine-dither-kit)
+12. [The design system: colours, fonts, spacing](#12-the-design-system-colours-fonts-spacing)
+13. [How the animations work](#13-how-the-animations-work)
+14. [Sound](#14-sound)
+15. [Where the data comes from](#15-where-the-data-comes-from)
+16. [Responsiveness and accessibility](#16-responsiveness-and-accessibility)
+17. [Running and building the project](#17-running-and-building-the-project)
+18. [Full file map](#18-full-file-map)
+19. [How to add a new page](#19-how-to-add-a-new-page)
 
 ---
 
 ## 1. What this website is
 
-This is a **front-end playground**: a single website that holds four separate,
+This is a **front-end playground**: a single website that holds five separate,
 polished UI demos. Each demo is a faithful build of a Figma design, and most of
 them are displayed inside a **laptop/phone mockup** — a fake device bezel drawn
 in CSS — so the demo looks like a screenshot of a real product.
 
-You move between the four demos using a small floating pager at the bottom of
+You move between the five demos using a small floating pager at the bottom of
 the screen.
 
-The four demos are:
+The five demos are:
 
 | Demo | What it shows |
 |---|---|
@@ -46,11 +49,17 @@ The four demos are:
 | **Notification Stack** | A stack of iOS-style notification cards that fan out and can be swiped away |
 | **Portfolio** | A finance dashboard with an animated chart, currency switching, and a drill-down insights view |
 | **Membership Dashboard** | A full SaaS admin screen — sidebar, sortable/filterable member table, pagination |
+| **Move** | A film picker on a phone: posters on a physical wheel you step through, with genre/year/sort filters, a Shuffle that throws the wheel, and synthesised sound |
 
 **Important thing to understand up front: there is no server and no database.**
 Everything you see is produced in the browser from data files that ship with the
-site. No login, no API calls, no backend. That makes it a *design and
+site. No login, no backend, no API calls. That makes it a *design and
 interaction* showcase rather than a working product.
+
+The one external dependency worth knowing about: **Move's film posters are
+hotlinked from TMDB's image CDN** (`image.tmdb.org`). The film *data* ships in
+the bundle like everything else, but the artwork is fetched at runtime — so Move
+is the only screen that needs a network connection to look right.
 
 ---
 
@@ -128,7 +137,7 @@ files, and unused styles never accumulate.
 The project defines its own vocabulary on top of Tailwind in
 [`src/index.css`](src/index.css) — things like `text-ink` (the project's black),
 `border-hairline` (the pale grey border) and `shadow-panel`. More on that in
-[section 11](#11-the-design-system-colours-fonts-spacing).
+[section 12](#12-the-design-system-colours-fonts-spacing).
 
 ### The motion — **Framer Motion**
 
@@ -153,10 +162,12 @@ instead of fixed-duration easing.
 | Package | What it does here |
 |---|---|
 | **glimm** | A small WebGL library that draws the colourful "sweep" wipe when a page transitions. WebGL means the graphics card draws it, so it stays smooth. |
-| **dither-kit** | The charting toolkit (area chart, pie chart). Its source lives *inside* this project at `src/components/dither-kit/` — see [section 10](#10-the-chart-engine-dither-kit). |
+| **dither-kit** | The charting toolkit (area chart, pie chart). Its source lives *inside* this project at `src/components/dither-kit/` — see [section 11](#11-the-chart-engine-dither-kit). |
 | **d3-scale / d3-shape** | Pure maths helpers used by dither-kit: "given a value of 52,487 and a box 300px tall, how far up should the point sit?" No drawing, just numbers. |
 | **clsx + tailwind-merge** | Combine class names safely. If two conflicting classes end up on one element, `tailwind-merge` keeps the last one instead of leaving both to fight. |
-| **@fontsource-variable/geist**, **svg-country-flags** | Bundled font and flag assets, so the site never depends on an external CDN. |
+| **@fontsource-variable/geist**, **@fontsource-variable/inter**, **svg-country-flags** | Bundled font and flag assets. Every typeface is self-hosted, so text never waits on a font CDN. |
+| **@web-kits/audio** | Synthesises the Move carousel's sounds from oscillators and noise at call time — there is no audio file in the bundle. See [section 14](#14-sound). |
+| **interface-kit** | Small interface primitives used by the newer screens. |
 | **oxlint** | A very fast linter that flags likely mistakes before they ship. |
 | **shadcn / Base UI / class-variance-authority** | Installed as part of the dither-kit setup. Only `src/components/ui/button.tsx` uses them, and no page currently imports it — treat it as scaffolding, not active code. |
 
@@ -187,7 +198,7 @@ flowchart LR
    `SweepProvider` (the transition effect), renders that demo, and puts the
    pager at the bottom.
 
-4. **The playground component** — one of the four demos, which then renders the
+4. **The playground component** — one of the five demos, which then renders the
    dozens of smaller components that make up its screen.
 
 One detail in `App.tsx` worth calling out:
@@ -296,8 +307,11 @@ Three details that matter:
   won't this scroll" bugs. Below 560px tall it stops shrinking and the whole page
   scrolls instead, so the content never squeezes to nothing.
 
-Three of the four demos use `DeviceFrame`. **Membership Dashboard deliberately
-doesn't** — it's a full-screen admin app, so it fills the browser window
+Three of the five demos use `DeviceFrame` — Article Reader, Notification Stack
+and Portfolio. **Move uses [`MobileFrame`](src/components/MobileFrame.tsx)**
+instead, the portrait phone shell described in
+[section 10](#10-page-5--move). **Membership Dashboard deliberately uses
+neither** — it's a full-screen admin app, so it fills the browser window
 directly.
 
 ### `SweepProvider` — the transition effect
@@ -602,7 +616,7 @@ Motion's `layoutId` — when two elements in different places share a `layoutId`
 Framer animates the element *between* the positions rather than removing one and
 adding another. That's why the glow slides down the menu instead of blinking.
 
-**The table** is a real, working data grid over 40 sample members:
+**The table** is a real, working data grid over 200 sample members:
 
 | Feature | How it works |
 |---|---|
@@ -626,7 +640,87 @@ width and padding value has a floor, a fluid middle and a ceiling.
 
 ---
 
-## 10. The chart engine (dither-kit)
+## 10. Page 5 — Move
+
+Source: [`src/playgrounds/Move.tsx`](src/playgrounds/Move.tsx) — at ~1,900 lines,
+the largest screen in the project.
+
+A film picker, shown in portrait on a phone. You step through movie posters, filter
+them down by genre, year and sort order, or hit Shuffle and let it pick for you.
+
+### The wheel is the whole idea
+
+Every other carousel on the web is a **track**: cards slide flat, left and right.
+This one is a **wheel**. The posters are chords on a single circle, and stepping
+forward rotates the entire circle — so a card doesn't slide off the edge, it
+*tips away and drops under the rim*.
+
+That one decision drives all the geometry, and the numbers are solved rather than
+guessed:
+
+| Constant | Value | Why |
+|---|---|---|
+| `WHEEL_STEP_DEG` | `14°` | The only free parameter. Past ~20° the poster title looks dropped; under ~8° the wheel flattens back into a track. |
+| `wheelRadius(pitch)` | `pitch / 2·sin(θ/2)` | Derived from the chord formula, not picked. The eye measures the *chord* between cards, not the arc — so solving it keeps the design's 20px gutter at every screen width. A narrower phone tightens the circle instead of letting cards drift apart or overlap. |
+| `SEAT_SCALE` | `0.874` | Each card shrinks per detent away from centre, so it reads as falling *away from you*, not merely tipping. Taken from the design's own 524.6×766.9 neighbour against a 600×877 centre — the same ratio on both axes and on the corner radius. |
+
+The scale is solved from the wheel's **live angle** rather than the card's index,
+so a poster grows continuously as it travels into the centre instead of snapping
+to a new size the moment the index changes.
+
+### Shuffle: hiding a cut with a focus pull
+
+Shuffle is the interesting problem. It can land on a film from a genre the wheel
+was never spinning through — so there's nothing to travel past, and the deck has
+to change in a single frame. A visible swap would read as a glitch.
+
+The fix is a **focus pull**, and the ordering is the entire trick:
+
+1. Over the **last 250ms of the spin**, while the wheel is still coasting into
+   its final detent, blur rises to 22px. The picture is gone *before* anything
+   changes, so the last card the reels showed is never seen to be the wrong one.
+2. The deck swaps under cover of that blur.
+3. Focus returns over **0.7s** — a lens finding the new film, rather than a card
+   being dealt.
+
+Raising the blur *before* the swap rather than at it isn't a refinement, it's the
+only order that works: `useEffect` runs after paint, so a blur applied on landing
+would arrive one frame late — and that one frame of a fully sharp wrong poster is
+exactly the cut the effect exists to hide.
+
+The house lights (`0.45s`) come up *before* the picture sharpens (`0.7s`), because
+that's the order those two things happen in a real room.
+
+### The rest of the screen
+
+- **Genre tray** — seven genres (Action, Animation, Comedy, Musical, Romance,
+  Sci-Fi, Sport), each with its own icon and tile colour. The pill and the
+  expanded tray share a `layoutId` (`GENRE_SURFACE`) so they read as one surface
+  morphing open, not two elements swapping.
+- **Filter menu** — year and sort (`featured`, `rating`, `newest`, `oldest`,
+  `runtime`). The year list is derived from whatever's actually in the current
+  genre, so you can never filter to an empty deck.
+- **Frosted glass** — every translucent surface is built from one warm white,
+  `rgb(252,250,246)`, with alpha composed per surface. Two points of blue removed
+  from the design's flat 250 is imperceptible as *colour* and unmistakable as
+  *temperature* — it's what stops the tray reading as a grey card dropped onto a
+  warm screen.
+- **Colour discipline** — icons inside anything pressable are flat black. Colour
+  is reserved for the three meta chips (year, runtime, rating), where hue
+  separates the three facts faster than their shapes do.
+
+### Supporting pieces built for this screen
+
+| File | What it does |
+|---|---|
+| [`MobileFrame.tsx`](src/components/MobileFrame.tsx) | The portrait phone shell — the mirror image of `DeviceFrame`. Where `DeviceFrame` shows the top of a device and bleeds off the *bottom* of the viewport, this does the opposite. Takes a `backdrop` node rather than an image `src`, because a page may want to cross-fade or blur its own layers into that slot. |
+| [`squircle.ts`](src/lib/squircle.ts) + [`useSquircle.ts`](src/components/useSquircle.ts) | Figma's corner smoothing as an SVG path. CSS genuinely cannot express this: `border-radius` draws a circular arc, and even `corner-shape: superellipse()` varies the curve *inside* the radius box. |
+| [`MiddleTruncate.tsx`](src/components/MiddleTruncate.tsx) | `head… tail` truncation, snapped outward to whole words so the cut never lands mid-word. |
+| [`films.ts`](src/lib/films.ts) | 207 films — artwork, synopsis, runtime, year, and a rating carried onto the design's five-point scale (TMDB's 79% → 4.0). |
+
+---
+
+## 11. The chart engine (dither-kit)
 
 The charts have a distinctive look: instead of a smooth gradient fill, the area
 under the curve is filled with a **dither** — a pattern of small coloured cells,
@@ -692,7 +786,7 @@ Three small changes were made to the vendored files to support the scrub effect
 
 ---
 
-## 11. The design system: colours, fonts, spacing
+## 12. The design system: colours, fonts, spacing
 
 Everything lives in [`src/index.css`](src/index.css) under Tailwind v4's
 `@theme` block. Define a variable there and Tailwind generates matching
@@ -714,19 +808,45 @@ Plus scoped sets for the Portfolio (`--color-stat`, `--color-loss`,
 
 ### Fonts
 
-Five typefaces, each with a job:
+Each typeface has a job:
 
 | Variable | Font | Used for |
 |---|---|---|
 | `--font-display` | Exposure Italic | Headlines in the Article Reader |
 | `--font-body` | Pretendard Std | Article body text |
 | `--font-figure` | Open Runde | The entire Portfolio sheet |
+| `--font-ui` | Inter Variable | UI labels on the newer screens |
 | — | Inter Display | The Membership Dashboard |
 | `--font-sans` | Geist Variable | Default fallback (from the shadcn setup) |
 
-All are loaded from `src/assets/fonts/` with `font-display: swap`, meaning text
-appears immediately in a fallback font and re-renders when the real one arrives —
-you never stare at invisible text.
+The bespoke faces live in `src/assets/fonts/` as **woff2**; Inter Variable and
+Geist Variable come from their `@fontsource` packages. Nothing is fetched from a
+font CDN, so text never waits on a third party.
+
+woff2 matters more than it sounds: it's Brotli-compressed and roughly a third the
+size of the equivalent `.otf`/`.ttf`, which took the font payload here from
+2.7 MB to 1.2 MB without touching a single glyph.
+
+Every face declares `font-display: swap`, meaning text appears immediately in a
+fallback and re-renders when the real font arrives — you never stare at invisible
+text.
+
+**About the display fallback.** `--font-display` reads:
+
+```css
+--font-display: 'Exposure Italic', 'Libre Baskerville', Georgia, serif;
+```
+
+Exposure is a *trial* font and deliberately kept out of version control, so a
+fresh clone won't have it — which is exactly when the fallback matters. Libre
+Baskerville sits behind it as an OFL-licensed italic serif that holds the
+headline's voice rather than dropping to a generic upright.
+
+One subtlety worth knowing if you touch this: the Libre Baskerville file is the
+*italic* cut, but its `@font-face` declares `font-style: normal` on purpose.
+Headline elements request `normal`, and relying on the browser to reach for an
+italic face as a last resort turned out to be inconsistent across engines.
+Declaring it `normal` guarantees the match.
 
 ### Fluid spacing
 
@@ -759,7 +879,7 @@ readable text and none at all.
 
 ---
 
-## 12. How the animations work
+## 13. How the animations work
 
 ### Everything comes from one file
 
@@ -812,15 +932,65 @@ motion can cause genuine nausea.
 
 ---
 
-## 13. Where the data comes from
+## 14. Sound
 
-Nowhere external. Every number and every word ships with the site:
+Only one screen makes any noise: the Move carousel. The palette lives in
+[`src/lib/sound.ts`](src/lib/sound.ts).
+
+**Every sound is synthesised, not sampled.** There isn't a single audio file in
+the bundle — each sound is built from oscillators and filtered noise at call
+time. That's the point of `@web-kits/audio`: a sound is a plain object, so it
+reads and diffs like the rest of the design tokens, and a pitch can be tuned in a
+code review rather than in a DAW.
+
+**Only two interactions make sound**, and the restraint is deliberate:
+
+| Sound | When |
+|---|---|
+| `DETENT` | The chevrons stepping the wheel one card |
+| `ROULETTE` | Shuffle throwing the wheel across the library |
+
+Opening the tray, picking a genre, filtering a year — all silent on purpose.
+Sound is the scarcest resource in an interface: the moment it accompanies every
+press it stops marking anything, and the two events that genuinely *are the wheel
+turning* lose the one signal that set them apart.
+
+Two rules shape the palette:
+
+1. **Nothing is a beep** — with one deliberate exception. Every hit pairs a
+   pitched layer with a filtered noise transient, and the pitched layer *falls*,
+   because real objects lose energy as they strike. A pitch that holds still is
+   the one thing that always sounds like a computer. The shuffle's pips break
+   this rule knowingly: a roulette table is a counter rather than an object, and
+   counters beep.
+2. **Everything is quiet.** Layer gains sit between 0.04 and 0.3, under a master
+   volume that turns the bus down again. These should read as texture on a press
+   you were already making, not as events of their own. The failure mode isn't
+   "too quiet to notice" — it's "loud enough to turn off".
+
+`DETENT` is a good miniature of the approach: the pitched layer drops more than
+an octave in 55ms so it never sits still long enough to be heard as a note, and
+the noise burst under it lasts 18ms — short enough to register as *attack* rather
+than hiss. Direction is a detune at the call site rather than a second
+definition, so forward is up and back is down, matching the wheel's rotation.
+
+**Reduced motion mutes it.** The library's hooks silence themselves when
+`prefers-reduced-motion` is set, so a viewer who asked for less gets silence
+without any of this code having to check.
+
+---
+
+## 15. Where the data comes from
+
+Every number and every word ships with the site — the only thing fetched at
+runtime is Move's poster artwork:
 
 | File | Contains |
 |---|---|
 | [`src/content/article.ts`](src/content/article.ts) | The article: title, byline, tags, every paragraph, and the AI summary |
 | [`src/lib/holdings.ts`](src/lib/holdings.ts) | The five stocks plus the seeded generator that varies their prices |
-| [`src/lib/members.ts`](src/lib/members.ts) | 40 sample members, four tiers, seven company logos |
+| [`src/lib/members.ts`](src/lib/members.ts) | 200 sample members, four tiers, seven company logos |
+| [`src/lib/films.ts`](src/lib/films.ts) | 207 films across seven genres — title, synopsis, runtime, year, rating. Poster *URLs* point at TMDB's CDN; the images themselves are not bundled. |
 | [`src/lib/currencies.ts`](src/lib/currencies.ts) | Five currencies with fixed reference rates |
 | [`src/lib/months.ts`](src/lib/months.ts) | The month picker's options |
 | Inside `Portfolio.tsx` | The 53-week chart series |
@@ -836,7 +1006,7 @@ What this means in practice:
 
 ---
 
-## 14. Responsiveness and accessibility
+## 16. Responsiveness and accessibility
 
 ### Responsive behaviour
 
@@ -874,7 +1044,7 @@ Real effort has gone in here:
 
 ---
 
-## 15. Running and building the project
+## 17. Running and building the project
 
 ```bash
 npm install
@@ -909,16 +1079,17 @@ they're third-party code held to their own conventions.
 
 ---
 
-## 16. Full file map
+## 18. Full file map
 
 ```
-Playground/
+InteractComponents/
 ├── index.html                  Entry page — one empty div
 ├── vite.config.ts              Build config, the @/ alias
 ├── package.json                Dependencies and scripts
 ├── dither-kit.json             Record of the vendored chart files
+├── components.json             shadcn config
+├── .oxlintrc.json              Linter config
 │
-├── Assets/                     Untouched original Figma exports
 ├── public/                     Files copied to the site root as-is
 │
 └── src/
@@ -926,16 +1097,18 @@ Playground/
     ├── App.tsx                 Chooses the demo, mounts the pager
     ├── index.css               Design tokens, fonts, custom utilities
     │
-    ├── playgrounds/            The four demos
+    ├── playgrounds/            The five demos
     │   ├── registry.ts           The list of pages — single source of truth
     │   ├── usePlayground.ts      Reads/writes the URL hash
     │   ├── ArticleReader.tsx
     │   ├── NotificationStack.tsx
     │   ├── Portfolio.tsx
-    │   └── MembershipDashboard.tsx
+    │   ├── MembershipDashboard.tsx
+    │   └── Move.tsx              The film wheel (~1,900 lines)
     │
-    ├── components/             ~40 UI building blocks
+    ├── components/             ~35 UI building blocks
     │   ├── DeviceFrame.tsx       The laptop mockup
+    │   ├── MobileFrame.tsx       The portrait phone shell (Move)
     │   ├── sweep.tsx             WebGL transition
     │   ├── sweep-context.ts      Shares sweep() through the tree
     │   ├── rise.ts               The house entrance animation
@@ -943,6 +1116,10 @@ Playground/
     │   ├── ProgressiveBlur.tsx   Ten-layer graduated blur
     │   ├── RollingNumber.tsx     Odometer digits
     │   ├── OutlineMinimap.tsx    Article outline with magnification
+    │   ├── MiddleTruncate.tsx    head… tail, snapped to whole words
+    │   ├── useSquircle.ts        Figma corner smoothing as an SVG path
+    │   ├── reading.ts            Word tokeniser for the read-along highlight
+    │   ├── useReadingCursor.ts   Advances the highlight at a reading pace
     │   ├── …                     Article, Portfolio and shared components
     │   ├── icons.tsx             Inline SVG icons (inherit colour, animate)
     │   ├── dither-kit/           The vendored chart engine
@@ -950,16 +1127,23 @@ Playground/
     │
     ├── lib/                    Logic and data, no UI
     │   ├── motion.ts             All timings, easings, springs
+    │   ├── sound.ts              The synthesised sound palette
+    │   ├── squircle.ts           The corner-smoothing maths
     │   ├── holdings.ts           Seeded portfolio generator
-    │   ├── members.ts            40 sample members
+    │   ├── members.ts            200 sample members
+    │   ├── films.ts              207 films across seven genres
     │   ├── currencies.ts         Currencies and fixed rates
     │   ├── months.ts             Month options
     │   ├── color.ts              Hex ↔ HSL helpers
     │   └── utils.ts              cn() class-name merger
     │
     ├── content/article.ts      The article, as data
-    └── assets/                 Fonts, icons, avatars, logos
+    └── assets/                 Fonts (woff2), icons, avatars, logos
 ```
+
+Two directories exist on disk but are deliberately **not** in version control, so
+you won't see them in a fresh clone: `Assets/` (the untouched original Figma
+exports, duplicated under `src/assets/`) and `plans/` (internal working notes).
 
 The organising principle is worth stating: **`lib/` never imports from
 `components/`.** Logic and data stay independent of the interface, which makes
@@ -967,7 +1151,7 @@ both easier to change.
 
 ---
 
-## 17. How to add a new page
+## 19. How to add a new page
 
 1. Create `src/playgrounds/MyDemo.tsx` exporting a component. Wrap the contents
    in `<DeviceFrame>` if you want the laptop mockup:
@@ -1019,6 +1203,8 @@ change a value, and the screen follows. **TypeScript** catches mistakes before
 they run. **Tailwind** styles everything through short class names built on a
 custom token set in `index.css`. **Framer Motion** handles every animation, with
 all timings centralised in `lib/motion.ts`. **dither-kit** paints the charts onto
-a canvas, and **glimm** paints the WebGL transition between views. Four demos
-live in a registry; the URL hash decides which one shows. All the data ships with
-the site, so there is no backend and nothing to go down.
+a canvas, **glimm** paints the WebGL transition between views, and
+**@web-kits/audio** synthesises the two sounds the film wheel makes. Five demos
+live in a registry; the URL hash decides which one shows. Effectively all the
+data ships with the site — only Move's poster artwork is fetched at runtime — so
+there is no backend and nothing to go down.

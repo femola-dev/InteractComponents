@@ -45,7 +45,8 @@ type Props = {
  * way round, instead of a band that pinches at the corners.
  */
 const BEZEL = 8
-const SCREEN_RADIUS = 52
+/** Exported so anything drawn *onto* the screen can hug the same corner. */
+export const SCREEN_RADIUS = 52
 const BEZEL_RADIUS = SCREEN_RADIUS + BEZEL
 export function MobileFrame({ backdrop, children }: Props) {
   // The device fills the viewport exactly, so anything that makes the document

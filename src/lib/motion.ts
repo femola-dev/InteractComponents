@@ -55,6 +55,28 @@ export const springMorph: Transition = {
 }
 
 /**
+ * A small pill snapping open into a wider one — the bottom switcher's hover
+ * morph, and anything else where the shape change *is* the interaction.
+ *
+ * Deliberately livelier than `springMorph`. That one is tuned for a large
+ * surface where overshoot reads as a wobble; here the box is ~40px tall and the
+ * travel is mostly horizontal, so a little elasticity is the point. At
+ * ζ = c / 2√(km) = 26 / 2√(340 × 1) ≈ 0.71 the width passes its target by
+ * roughly 4% and comes back once — a pill that snaps rather than inflates —
+ * and ωn = √(k/m) ≈ 18.4 rad/s settles it in about 4/ζωn ≈ 0.30s.
+ *
+ * Below ζ ≈ 0.6 the return trip becomes a second visible bounce and the pill
+ * reads as rubbery; above ζ ≈ 0.85 the overshoot disappears and it is just
+ * `springMorph` with extra steps.
+ */
+export const springPill: Transition = {
+  type: 'spring',
+  stiffness: 340,
+  damping: 26,
+  mass: 1,
+}
+
+/**
  * A detented wheel: the Move carousel's rotation, and anything else that steps
  * between fixed stops under its own momentum.
  *
@@ -81,6 +103,65 @@ export const springWheel: SpringOptions = {
   mass: 1.1,
   restDelta: 0.01,
 }
+
+/**
+ * The shuffle's throw — one timing table, driving both the cards and the sound.
+ *
+ * This is the only reason any of it lines up. An easing curve for the rotation
+ * and a separate rhythm for the clicks will always drift: eyeball them into
+ * agreement and they part company the moment either is retuned. So the table
+ * below says *when each card crosses the top of the wheel*, the carousel
+ * animates through it as keyframes, and the roulette fires one fret at each
+ * entry. A tick is not "roughly when a card goes past" — it is the card going
+ * past, because they read the same array.
+ */
+export const SPIN_SECONDS = 3
+
+/**
+ * Cards the wheel travels while a shuffle thinks.
+ *
+ * Bounded at both ends. Under about ten, three seconds read as a pause with a
+ * nudge in it rather than as a spin. Above twenty the cost shows: the carousel
+ * mounts every card the rim crosses, each panel carries four copies of its
+ * poster for the blur ramp, and the posters come off a CDN — so each extra
+ * detent is a live image fetch. Fourteen still reads as a reel and the network
+ * still keeps up.
+ */
+export const SPIN_DETENTS = 14
+
+/**
+ * How much wider each gap is than the one before it — the whole shape of the
+ * deceleration, in one number.
+ *
+ * A wheel losing energy is the only thing separating a spin from a machine gun,
+ * and geometric is how it actually loses it: friction takes a fraction of what
+ * is left, not a fixed amount. At 1.14 the gaps run 77ms to 420ms across the
+ * throw. Flatten it towards 1.0 and the spin becomes a metronome; push it past
+ * about 1.2 and the whole thing is over in the first second, leaving two
+ * seconds of a wheel that has visibly already stopped.
+ */
+const SPIN_SLOWING = 1.14
+
+/** Left at the end for the ball to drop, after the last card has landed. */
+const SPIN_SETTLE = 0.12
+
+/**
+ * When each card crosses the top of the wheel, in seconds from the press.
+ *
+ * The gaps are generated as bare ratios and then scaled to fit, rather than
+ * being picked in milliseconds — which is what keeps `SPIN_SLOWING` a free
+ * parameter. Retune the deceleration, or the length, or the number of cards,
+ * and the table still ends exactly where it should instead of needing three
+ * constants solved against each other by hand.
+ */
+export const SPIN_CROSSINGS: number[] = (() => {
+  const gaps = Array.from({ length: SPIN_DETENTS }, (_, i) => SPIN_SLOWING ** i)
+  const total = gaps.reduce((sum, gap) => sum + gap, 0)
+  const span = SPIN_SECONDS - SPIN_SETTLE
+
+  let elapsed = 0
+  return gaps.map((gap) => (elapsed += (gap / total) * span))
+})()
 
 /** Badges, pops, anything that should overshoot slightly before settling. */
 export const springOvershoot: Transition = {
