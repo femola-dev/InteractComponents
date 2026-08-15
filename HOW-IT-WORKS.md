@@ -117,8 +117,8 @@ works out the rest.
 
 Interfaces are built from **components**: small reusable functions that return a
 piece of screen. `<ListenButton />` is a component. So is an entire page. Bigger
-components are made by nesting smaller ones, which is why this project has ~40
-component files instead of four giant ones.
+components are made by nesting smaller ones, which is why this project has 60-odd
+component files instead of five giant ones.
 
 ### The styling — **Tailwind CSS v4**
 

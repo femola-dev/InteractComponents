@@ -88,7 +88,7 @@ export function PortfolioInsights({ currency, onCurrencyChange, onBack }: Props)
             type="button"
             onClick={onBack}
             aria-label="Back to Portfolio Performance"
-            className="text-outline flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ink/25"
+            className="text-outline flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[100px] bg-[#F3F3F3] outline-none focus-visible:ring-2 focus-visible:ring-ink/25"
           >
             <ChevronIcon direction="left" />
           </button>

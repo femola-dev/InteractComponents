@@ -12,7 +12,7 @@ import { ProgressiveBlur } from '../components/ProgressiveBlur'
 import { PublishedMeta } from '../components/PublishedMeta'
 import { TOTAL_WORDS } from '../components/reading'
 import { useActiveSection } from '../components/useActiveSection'
-import { useReadingCursor } from '../components/useReadingCursor'
+import { useReadingCursor, type NarrationStatus } from '../components/useReadingCursor'
 import { useSweep } from '../components/sweep-context'
 import { article } from '../content/article'
 
@@ -20,12 +20,15 @@ type View = 'article' | 'summary'
 
 export function ArticleReader() {
   const [view, setView] = useState<View>('article')
-  const [isPlaying, setIsPlaying] = useState(false)
+  // Narration is a hold, not a stop: it lives here for the life of the page and
+  // only a reload puts it back to `idle`.
+  const [narration, setNarration] = useState<NarrationStatus>('idle')
   const scrollRef = useRef<HTMLDivElement>(null)
   const sweep = useSweep()
 
+  const isPlaying = narration === 'playing'
   const activeSection = useActiveSection(scrollRef, article.sections[0].id)
-  const readingCursor = useReadingCursor(isPlaying, TOTAL_WORDS)
+  const readingCursor = useReadingCursor(narration, TOTAL_WORDS)
 
   // Follow the highlight, but only once it leaves the comfortable middle band —
   // scrolling on every word would yank the page out from under the reader.
@@ -46,11 +49,14 @@ export function ArticleReader() {
       top: container.scrollTop + (box.top - frame.top) - frame.height * 0.35,
       behavior: 'smooth',
     })
-  }, [readingCursor])
+    // `view` is a dependency so coming back from the summary brings the parked
+    // mark into sight rather than leaving it wherever the fresh scroll landed.
+  }, [readingCursor, view])
 
   const toggleView = () => {
     // Narration belongs to the article; the summary is not what it was reading.
-    setIsPlaying(false)
+    // It holds rather than stops, so the article is still mid-sentence on return.
+    setNarration((s) => (s === 'playing' ? 'paused' : s))
     sweep(
       () => {
         setView((v) => (v === 'article' ? 'summary' : 'article'))
@@ -121,8 +127,10 @@ export function ArticleReader() {
                 <div className="flex flex-col gap-6">
                   <ArticleHeader />
                   <ActionsBar
-                    isPlaying={isPlaying}
-                    onToggleListen={() => setIsPlaying((p) => !p)}
+                    status={narration}
+                    onToggleListen={() =>
+                      setNarration((s) => (s === 'playing' ? 'paused' : 'playing'))
+                    }
                   />
                 </div>
                 <ArticleBody cursor={readingCursor} />

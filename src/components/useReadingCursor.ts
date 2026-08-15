@@ -13,15 +13,23 @@ import { useEffect, useState } from 'react'
     each word 400ms, which the eye can comfortably ride. */
 const WORDS_PER_MINUTE = 150
 
-/** @returns the word to highlight, or `null` when nothing is being read. */
-export function useReadingCursor(isPlaying: boolean, total: number) {
+/**
+ * `idle` is the state the page loads in — nothing has been read yet, so there
+ * is no place to hold. Once narration has started it only ever moves between
+ * `playing` and `paused`, and a pause keeps its place.
+ */
+export type NarrationStatus = 'idle' | 'playing' | 'paused'
+
+/** @returns the word to highlight, or `null` when nothing has been read yet. */
+export function useReadingCursor(status: NarrationStatus, total: number) {
   const [index, setIndex] = useState(0)
 
   useEffect(() => {
-    // Rewind on stop, so the next play starts from the top rather than
-    // resuming somewhere the reader has long since scrolled past.
-    if (!isPlaying) {
-      setIndex(0)
+    if (status !== 'playing') {
+      // A pause is a bookmark: the index stays put so the next play picks the
+      // sentence back up. Only a full stop rewinds — and the only stop is a
+      // reload, which takes the whole state with it.
+      if (status === 'idle') setIndex(0)
       return
     }
 
@@ -30,7 +38,9 @@ export function useReadingCursor(isPlaying: boolean, total: number) {
       60_000 / WORDS_PER_MINUTE,
     )
     return () => window.clearInterval(id)
-  }, [isPlaying, total])
+  }, [status, total])
 
-  return isPlaying ? index : null
+  // Paused still reports a word: the mark stays visible, parked where the
+  // reader left it.
+  return status === 'idle' ? null : index
 }

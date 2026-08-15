@@ -4,13 +4,14 @@ import { ListenButton } from './ListenButton'
 import { PillButton } from './PillButton'
 import { useRise } from './rise'
 import { TagPill } from './TagPill'
+import type { NarrationStatus } from './useReadingCursor'
 
 type Props = {
-  isPlaying: boolean
+  status: NarrationStatus
   onToggleListen: () => void
 }
 
-export function ActionsBar({ isPlaying, onToggleListen }: Props) {
+export function ActionsBar({ status, onToggleListen }: Props) {
   const rise = useRise()
 
   return (
@@ -19,7 +20,7 @@ export function ActionsBar({ isPlaying, onToggleListen }: Props) {
       className="flex flex-wrap items-center justify-between gap-y-3"
     >
       <div className="flex items-center gap-2">
-        <ListenButton isPlaying={isPlaying} onToggle={onToggleListen} />
+        <ListenButton status={status} onToggle={onToggleListen} />
         <PillButton label="Share" />
         <PillButton label="Options" />
       </div>
