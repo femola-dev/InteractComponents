@@ -113,8 +113,32 @@ const beep = (frequency: number): SoundDefinition => ({
 })
 
 /**
- * The ball dropping into a pocket. Deliberately not a chime — a roulette wheel
- * does not congratulate you, it just stops.
+ * The ball dropping into a pocket, and the machine acknowledging it.
+ *
+ * The first two layers are the drop and have not changed: a triangle falling
+ * 420Hz to 190 for the weight of it, brown noise for the rattle. That is the
+ * wheel's own sound, and it is the reason this is a *thud* rather than a chime
+ * — a roulette wheel does not congratulate you, it just stops.
+ *
+ * The third layer is the one that answers you, and it is a deliberate reversal
+ * of that. This is a shuffle: unlike every other sound in the file, it is not
+ * feedback on something you did, it is the machine's *answer* to something you
+ * asked. Ending it on a pure thud left the moment mechanically correct and
+ * dramatically flat — four seconds of counting that resolves onto a shrug. So
+ * the pocket now has a two-note tail rising a fifth, 520Hz to 780, which is the
+ * shape a prize machine uses and the shape the ear reads as an outcome.
+ *
+ * It stays under the drop rather than replacing it — a third of the gain, and
+ * a 70ms attack, so the thud is what lands and the tone is what it settles
+ * into. The slow attack is doing the work of a delay, which an `Envelope` here
+ * has no field for: a sine that takes 70ms to reach full is inaudible under the
+ * drop's own transient and only surfaces once that has gone. Loud enough or
+ * sharp enough and it becomes a jackpot fanfare, which this is not — you have
+ * been given a film, not a win.
+ *
+ * A sine, alone in a file of squares and triangles. The beeps are counting and
+ * want harmonics to cut through their own tempo; this one is a single held note
+ * at the end of everything, with nothing left to cut through.
  */
 const POCKET: SoundDefinition = {
   layers: [
@@ -129,6 +153,11 @@ const POCKET: SoundDefinition = {
       filter: { type: 'bandpass', frequency: 700, resonance: 1.1 },
       envelope: { decay: 0.05 },
       gain: 0.14,
+    },
+    {
+      source: { type: 'sine', frequency: { start: 520, end: 780 } },
+      envelope: { attack: 0.07, decay: 0.34 },
+      gain: 0.09,
     },
   ],
   effects: [{ type: 'reverb', decay: 0.4, mix: 0.14 }],
