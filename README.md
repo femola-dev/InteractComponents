@@ -14,11 +14,11 @@ npm run dev
 Each page is one entry in `src/playgrounds/registry.ts`:
 
 ```ts
-{ id: 'notification-stack', label: 'Notifications', Component: NotificationStack }
+{ id: 'article-reader', label: 'Article Reader', Component: ArticleReader }
 ```
 
 Add an entry and the pager at the bottom of the screen picks it up — nothing
-else to wire. The `id` doubles as the URL hash (`#/notification-stack`), so a
+else to wire. The `id` doubles as the URL hash (`#/article-reader`), so a
 page can be linked to and survives a reload; `usePlayground` reads it back and
 falls back to the first entry for an unknown hash.
 
@@ -29,8 +29,6 @@ both ends. `SweepProvider` stays above the active page in `App`, so every page's
 `DeviceFrame` can mount the sweep canvas.
 
 - **Article Reader** — the Figma frame, described below
-- **Notification Stack** — a stack of cards that fans out on hover (or tap) and
-  dismisses on a sideways drag
 - **Portfolio** — the Figma frame "Line Template (Web)" (node `147:14`), a
   portfolio performance sheet
 

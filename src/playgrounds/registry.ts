@@ -1,9 +1,9 @@
 import type { ComponentType } from 'react'
 import { ArticleReader } from './ArticleReader'
-import { NotificationStack } from './NotificationStack'
 import { Portfolio } from './Portfolio'
 import { MembershipDashboard } from './MembershipDashboard'
 import { Move } from './Move'
+import { ChatView } from './ChatView'
 
 export type Playground = {
   /** Also the URL hash: `#/article-reader`. Keep it kebab-case and stable. */
@@ -19,10 +19,10 @@ export type Playground = {
  */
 export const playgrounds: Playground[] = [
   { id: 'article-reader', label: 'Article Reader', Component: ArticleReader },
-  { id: 'notification-stack', label: 'Notifications', Component: NotificationStack },
   { id: 'portfolio', label: 'Portfolio', Component: Portfolio },
   { id: 'membership-dashboard', label: 'Membership', Component: MembershipDashboard },
-  { id: 'move', label: 'Move', Component: Move },
+  { id: 'movie-choice', label: 'Movie Choice', Component: Move },
+  { id: 'chat-view', label: 'Chat View', Component: ChatView },
 ]
 
 export const defaultPlaygroundId = playgrounds[0].id

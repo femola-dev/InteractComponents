@@ -2,7 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { defaultPlaygroundId, playgrounds } from './registry'
 
 /**
- * The active playground lives in the URL hash (`#/notification-stack`) so a page
+ * The active playground lives in the URL hash (`#/article-reader`) so a page
  * can be linked to and survives a reload. Unknown or missing hashes fall back to
  * the first entry in the registry.
  */

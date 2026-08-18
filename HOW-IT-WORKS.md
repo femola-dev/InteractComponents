@@ -15,38 +15,36 @@ rather than assumed.
 4. [How pages work (the "router")](#4-how-pages-work-the-router)
 5. [The shared shell every page sits in](#5-the-shared-shell-every-page-sits-in)
 6. [Page 1 — Article Reader](#6-page-1--article-reader)
-7. [Page 2 — Notification Stack](#7-page-2--notification-stack)
-8. [Page 3 — Portfolio](#8-page-3--portfolio)
-9. [Page 4 — Membership Dashboard](#9-page-4--membership-dashboard)
-10. [Page 5 — Move](#10-page-5--move)
-11. [The chart engine (dither-kit)](#11-the-chart-engine-dither-kit)
-12. [The design system: colours, fonts, spacing](#12-the-design-system-colours-fonts-spacing)
-13. [How the animations work](#13-how-the-animations-work)
-14. [Sound](#14-sound)
-15. [Where the data comes from](#15-where-the-data-comes-from)
-16. [Responsiveness and accessibility](#16-responsiveness-and-accessibility)
-17. [Running and building the project](#17-running-and-building-the-project)
-18. [Full file map](#18-full-file-map)
-19. [How to add a new page](#19-how-to-add-a-new-page)
+7. [Page 2 — Portfolio](#7-page-2--portfolio)
+8. [Page 3 — Membership Dashboard](#8-page-3--membership-dashboard)
+9. [Page 4 — Move](#9-page-4--move)
+10. [The chart engine (dither-kit)](#10-the-chart-engine-dither-kit)
+11. [The design system: colours, fonts, spacing](#11-the-design-system-colours-fonts-spacing)
+12. [How the animations work](#12-how-the-animations-work)
+13. [Sound](#13-sound)
+14. [Where the data comes from](#14-where-the-data-comes-from)
+15. [Responsiveness and accessibility](#15-responsiveness-and-accessibility)
+16. [Running and building the project](#16-running-and-building-the-project)
+17. [Full file map](#17-full-file-map)
+18. [How to add a new page](#18-how-to-add-a-new-page)
 
 ---
 
 ## 1. What this website is
 
-This is a **front-end playground**: a single website that holds five separate,
+This is a **front-end playground**: a single website that holds four separate,
 polished UI demos. Each demo is a faithful build of a Figma design, and most of
 them are displayed inside a **laptop/phone mockup** — a fake device bezel drawn
 in CSS — so the demo looks like a screenshot of a real product.
 
-You move between the five demos using a small floating pager at the bottom of
+You move between the four demos using a small floating pager at the bottom of
 the screen.
 
-The five demos are:
+The four demos are:
 
 | Demo | What it shows |
 |---|---|
 | **Article Reader** | A long-form article page with an outline sidebar, a "Listen" button, and an AI-summary view |
-| **Notification Stack** | A stack of iOS-style notification cards that fan out and can be swiped away |
 | **Portfolio** | A finance dashboard with an animated chart, currency switching, and a drill-down insights view |
 | **Membership Dashboard** | A full SaaS admin screen — sidebar, sortable/filterable member table, pagination |
 | **Move** | A film picker on a phone: posters on a physical wheel you step through, with genre/year/sort filters, a Shuffle that throws the wheel, and synthesised sound |
@@ -137,7 +135,7 @@ files, and unused styles never accumulate.
 The project defines its own vocabulary on top of Tailwind in
 [`src/index.css`](src/index.css) — things like `text-ink` (the project's black),
 `border-hairline` (the pale grey border) and `shadow-panel`. More on that in
-[section 12](#12-the-design-system-colours-fonts-spacing).
+[section 11](#11-the-design-system-colours-fonts-spacing).
 
 ### The motion — **Framer Motion**
 
@@ -162,11 +160,11 @@ instead of fixed-duration easing.
 | Package | What it does here |
 |---|---|
 | **glimm** | A small WebGL library that draws the colourful "sweep" wipe when a page transitions. WebGL means the graphics card draws it, so it stays smooth. |
-| **dither-kit** | The charting toolkit (area chart, pie chart). Its source lives *inside* this project at `src/components/dither-kit/` — see [section 11](#11-the-chart-engine-dither-kit). |
+| **dither-kit** | The charting toolkit (area chart, pie chart). Its source lives *inside* this project at `src/components/dither-kit/` — see [section 10](#10-the-chart-engine-dither-kit). |
 | **d3-scale / d3-shape** | Pure maths helpers used by dither-kit: "given a value of 52,487 and a box 300px tall, how far up should the point sit?" No drawing, just numbers. |
 | **clsx + tailwind-merge** | Combine class names safely. If two conflicting classes end up on one element, `tailwind-merge` keeps the last one instead of leaving both to fight. |
 | **@fontsource-variable/geist**, **@fontsource-variable/inter**, **svg-country-flags** | Bundled font and flag assets. Every typeface is self-hosted, so text never waits on a font CDN. |
-| **@web-kits/audio** | Synthesises the Move carousel's sounds from oscillators and noise at call time — there is no audio file in the bundle. See [section 14](#14-sound). |
+| **@web-kits/audio** | Synthesises the Move carousel's sounds from oscillators and noise at call time — there is no audio file in the bundle. See [section 13](#13-sound). |
 | **interface-kit** | Small interface primitives used by the newer screens. |
 | **oxlint** | A very fast linter that flags likely mistakes before they ship. |
 | **shadcn / Base UI / class-variance-authority** | Installed as part of the dither-kit setup. Only `src/components/ui/button.tsx` uses them, and no page currently imports it — treat it as scaffolding, not active code. |
@@ -198,7 +196,7 @@ flowchart LR
    `SweepProvider` (the transition effect), renders that demo, and puts the
    pager at the bottom.
 
-4. **The playground component** — one of the five demos, which then renders the
+4. **The playground component** — one of the four demos, which then renders the
    dozens of smaller components that make up its screen.
 
 One detail in `App.tsx` worth calling out:
@@ -226,7 +224,6 @@ pages, so it uses about 35 lines instead.
 ```ts
 export const playgrounds = [
   { id: 'article-reader',       label: 'Article Reader', Component: ArticleReader },
-  { id: 'notification-stack',   label: 'Notifications',  Component: NotificationStack },
   { id: 'portfolio',            label: 'Portfolio',      Component: Portfolio },
   { id: 'membership-dashboard', label: 'Membership',     Component: MembershipDashboard },
 ]
@@ -307,10 +304,9 @@ Three details that matter:
   won't this scroll" bugs. Below 560px tall it stops shrinking and the whole page
   scrolls instead, so the content never squeezes to nothing.
 
-Three of the five demos use `DeviceFrame` — Article Reader, Notification Stack
-and Portfolio. **Move uses [`MobileFrame`](src/components/MobileFrame.tsx)**
+Two of the four demos use `DeviceFrame` — Article Reader and Portfolio. **Move uses [`MobileFrame`](src/components/MobileFrame.tsx)**
 instead, the portrait phone shell described in
-[section 10](#10-page-5--move). **Membership Dashboard deliberately uses
+[section 9](#9-page-4--move). **Membership Dashboard deliberately uses
 neither** — it's a full-screen admin app, so it fills the browser window
 directly.
 
@@ -437,51 +433,8 @@ Clicking again sweeps back **in the opposite direction** (`rtl` instead of
 
 ---
 
-## 7. Page 2 — Notification Stack
 
-The smallest demo, and a good one for understanding Framer Motion. Source:
-[`src/playgrounds/NotificationStack.tsx`](src/playgrounds/NotificationStack.tsx).
-
-**What you see:** three notification cards stacked like a deck. Hover (or tap on
-touch) and they fan out into a readable list. Drag one sideways and it flies
-away.
-
-**How the stack geometry works.** Every card is `position: absolute` and pinned
-to the bottom of the container. Their appearance is pure arithmetic off their
-index in the list:
-
-| | Collapsed | Expanded |
-|---|---|---|
-| Vertical offset | `-i × 12px` | `-i × 86px` (full card height + gap) |
-| Scale | `1 - i × 0.05` | `1` |
-| Opacity | `1 - i × 0.15` | `1` |
-
-So card 0 is full size and fully opaque; each card behind is slightly smaller,
-slightly higher and slightly faded — which is exactly what reads as depth. Switch
-one set of numbers for the other and Framer Motion springs between them.
-
-**Swipe to dismiss.** Cards are `drag="x"` with constraints pinned to zero, so a
-card always springs back unless you commit. On release the code checks two
-things:
-
-```ts
-if (Math.abs(info.offset.x) > 90 || Math.abs(info.velocity.x) > 500) dismiss(...)
-```
-
-Either **far enough** (90px) *or* **fast enough** (a flick). Checking velocity as
-well as distance is what makes a quick flick work — without it, short fast
-swipes feel broken.
-
-**Removal animation.** `AnimatePresence` is what lets a dismissed card fade and
-shrink on its way out. Normally React deletes an element instantly; this wrapper
-keeps it alive just long enough to finish its exit animation.
-
-The buttons below add a new card to the front of the list or clear them all; when
-the list is empty an "All caught up" placeholder fades in.
-
----
-
-## 8. Page 3 — Portfolio
+## 7. Page 2 — Portfolio
 
 The most technically involved demo, and it's really *two* screens.
 Source: [`src/playgrounds/Portfolio.tsx`](src/playgrounds/Portfolio.tsx) and
@@ -584,7 +537,7 @@ the card.
 
 ---
 
-## 9. Page 4 — Membership Dashboard
+## 8. Page 3 — Membership Dashboard
 
 A full admin screen, and the only demo that skips the device mockup. Source:
 [`src/playgrounds/MembershipDashboard.tsx`](src/playgrounds/MembershipDashboard.tsx).
@@ -640,7 +593,7 @@ width and padding value has a floor, a fluid middle and a ceiling.
 
 ---
 
-## 10. Page 5 — Move
+## 9. Page 4 — Move
 
 Source: [`src/playgrounds/Move.tsx`](src/playgrounds/Move.tsx) — at ~1,900 lines,
 the largest screen in the project.
@@ -720,7 +673,7 @@ that's the order those two things happen in a real room.
 
 ---
 
-## 11. The chart engine (dither-kit)
+## 10. The chart engine (dither-kit)
 
 The charts have a distinctive look: instead of a smooth gradient fill, the area
 under the curve is filled with a **dither** — a pattern of small coloured cells,
@@ -786,7 +739,7 @@ Three small changes were made to the vendored files to support the scrub effect
 
 ---
 
-## 12. The design system: colours, fonts, spacing
+## 11. The design system: colours, fonts, spacing
 
 Everything lives in [`src/index.css`](src/index.css) under Tailwind v4's
 `@theme` block. Define a variable there and Tailwind generates matching
@@ -879,7 +832,7 @@ readable text and none at all.
 
 ---
 
-## 13. How the animations work
+## 12. How the animations work
 
 ### Everything comes from one file
 
@@ -900,8 +853,7 @@ The distinction between the two springs is the useful part:
 
 - **`springResponsive`** — settles cleanly with almost no bounce. Sliders,
   handles, counters, things moving between containers.
-- **`springOvershoot`** — overshoots slightly before settling. Badges, pops, the
-  front card of the notification stack.
+- **`springOvershoot`** — overshoots slightly before settling. Badges and pops.
 
 `pressable` uses `scale: 0.98`, not `0.9` — a firm press, not a collapse.
 
@@ -922,7 +874,6 @@ interaction animation is never accidentally driven by its parent's entrance.
 If the viewer has "reduce motion" enabled in their operating system:
 
 - `useRise()` returns no animation at all,
-- notification cards can't be dragged,
 - the odometer jumps to its value instead of rolling,
 - the WebGL sweep is skipped and content simply swaps,
 - and a global CSS rule cuts every remaining transition to 0.01ms.
@@ -932,7 +883,7 @@ motion can cause genuine nausea.
 
 ---
 
-## 14. Sound
+## 13. Sound
 
 Only one screen makes any noise: the Move carousel. The palette lives in
 [`src/lib/sound.ts`](src/lib/sound.ts).
@@ -980,7 +931,7 @@ without any of this code having to check.
 
 ---
 
-## 15. Where the data comes from
+## 14. Where the data comes from
 
 Every number and every word ships with the site — the only thing fetched at
 runtime is Move's poster artwork:
@@ -1006,7 +957,7 @@ What this means in practice:
 
 ---
 
-## 16. Responsiveness and accessibility
+## 15. Responsiveness and accessibility
 
 ### Responsive behaviour
 
@@ -1044,7 +995,7 @@ Real effort has gone in here:
 
 ---
 
-## 17. Running and building the project
+## 16. Running and building the project
 
 ```bash
 npm install
@@ -1079,7 +1030,7 @@ they're third-party code held to their own conventions.
 
 ---
 
-## 18. Full file map
+## 17. Full file map
 
 ```
 InteractComponents/
@@ -1097,11 +1048,10 @@ InteractComponents/
     ├── App.tsx                 Chooses the demo, mounts the pager
     ├── index.css               Design tokens, fonts, custom utilities
     │
-    ├── playgrounds/            The five demos
+    ├── playgrounds/            The four demos
     │   ├── registry.ts           The list of pages — single source of truth
     │   ├── usePlayground.ts      Reads/writes the URL hash
     │   ├── ArticleReader.tsx
-    │   ├── NotificationStack.tsx
     │   ├── Portfolio.tsx
     │   ├── MembershipDashboard.tsx
     │   └── Move.tsx              The film wheel (~1,900 lines)
@@ -1151,7 +1101,7 @@ both easier to change.
 
 ---
 
-## 19. How to add a new page
+## 18. How to add a new page
 
 1. Create `src/playgrounds/MyDemo.tsx` exporting a component. Wrap the contents
    in `<DeviceFrame>` if you want the laptop mockup:
@@ -1204,7 +1154,7 @@ they run. **Tailwind** styles everything through short class names built on a
 custom token set in `index.css`. **Framer Motion** handles every animation, with
 all timings centralised in `lib/motion.ts`. **dither-kit** paints the charts onto
 a canvas, **glimm** paints the WebGL transition between views, and
-**@web-kits/audio** synthesises the two sounds the film wheel makes. Five demos
+**@web-kits/audio** synthesises the two sounds the film wheel makes. Four demos
 live in a registry; the URL hash decides which one shows. Effectively all the
 data ships with the site — only Move's poster artwork is fetched at runtime — so
 there is no backend and nothing to go down.

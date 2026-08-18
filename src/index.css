@@ -92,6 +92,36 @@
   font-display: swap;
 }
 
+/* Test Söhne, in three families rather than one with weight variants. The Chat
+   View (Figma node 308:454) picks between the normal, Breit (extended) and Mono
+   cuts per element, and those are separate typefaces — filing them as weights of
+   one family would let the browser substitute the wrong cut when a weight is
+   missing. OTF because that is what the foundry's trial ships; there is no
+   woff2 to convert from. */
+@font-face {
+  font-family: 'Test Söhne';
+  src: url('./assets/fonts/TestSohne-Buch-BF663d89cd32e6a.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Test Söhne Breit';
+  src: url('./assets/fonts/TestSohneBreit-Kraftig-BF663d89caa6b6c.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Test Söhne Mono';
+  src: url('./assets/fonts/TestSohneMono-Buch-BF663d89cbcec64.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --font-display: 'Exposure Italic', 'Libre Baskerville', Georgia, serif;
   --font-body: 'Pretendard Std', system-ui, sans-serif;
@@ -101,6 +131,11 @@
      design (node 236:3) specifies `Inter` for its control pill and panel
      labels, and at 24px the two optical sizes are visibly different. */
   --font-ui: 'Inter Variable', system-ui, sans-serif;
+  /* Chat View is set in Söhne end to end: Buch for every label, the Breit cut
+     for the "Conversations" title, Mono for the PINNED CHATS / GROUPS headers. */
+  --font-sohne: 'Test Söhne', system-ui, sans-serif;
+  --font-sohne-breit: 'Test Söhne Breit', 'Test Söhne', system-ui, sans-serif;
+  --font-sohne-mono: 'Test Söhne Mono', ui-monospace, monospace;
 
   /* House design tokens. Mirror any animated value in src/lib/motion.ts so the
      CSS and JS halves never drift. */
