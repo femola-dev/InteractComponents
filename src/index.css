@@ -92,6 +92,17 @@
   font-display: swap;
 }
 
+/* TWK Lausanne, Semibold only — the Writers Garden design (node 312:2975) is
+   set in the 600 weight end to end and asks for nothing else, so there is no
+   second cut to ship. */
+@font-face {
+  font-family: 'TWK Lausanne';
+  src: url('./assets/fonts/TWKLausanne-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Test Söhne, in three families rather than one with weight variants. The Chat
    View (Figma node 308:454) picks between the normal, Breit (extended) and Mono
    cuts per element, and those are separate typefaces — filing them as weights of
@@ -133,6 +144,11 @@
   --font-ui: 'Inter Variable', system-ui, sans-serif;
   /* Chat View is set in Söhne end to end: Buch for every label, the Breit cut
      for the "Conversations" title, Mono for the PINNED CHATS / GROUPS headers. */
+  /* Writers Garden (node 312:2975) is set in TWK Lausanne Semibold end to end,
+     and only that one weight is shipped. Inter Display stays behind it as the
+     fallback: both are tight neo-grotesques with a display optical size, so a
+     swap costs the counters rather than the layout. */
+  --font-lausanne: 'TWK Lausanne', 'Inter Display', 'Inter Variable', system-ui, sans-serif;
   --font-sohne: 'Test Söhne', system-ui, sans-serif;
   --font-sohne-breit: 'Test Söhne Breit', 'Test Söhne', system-ui, sans-serif;
   --font-sohne-mono: 'Test Söhne Mono', ui-monospace, monospace;

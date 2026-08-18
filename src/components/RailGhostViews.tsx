@@ -245,7 +245,7 @@ function GhostPane({ item, children }: { item: RailItem; children: ReactNode }) 
     >
       <motion.header
         variants={fadeBlurIn}
-        className="flex h-11 shrink-0 items-center justify-between px-6"
+        className="flex h-11 shrink-0 items-center justify-between pr-6 pl-[20px]"
       >
         <div className="flex items-center gap-2.5">
           {/* The rail's own selected glyph, chip and hairline already baked in. */}
@@ -265,9 +265,10 @@ function GhostPane({ item, children }: { item: RailItem; children: ReactNode }) 
         </div>
       </motion.header>
 
-      {/* `px-6` is the header's gutter, so every body's left edge lands under the
-          title's icon rather than in a centred column of its own. */}
-      <div className="flex min-h-0 flex-1 overflow-hidden px-6">{children}</div>
+      {/* The same 20px left gutter the header uses, so every body's left edge
+          lands under the title's icon rather than in a centred column of its
+          own. Both are one number in two places — change them together. */}
+      <div className="flex min-h-0 flex-1 overflow-hidden pr-6 pl-[20px]">{children}</div>
     </motion.section>
   )
 }

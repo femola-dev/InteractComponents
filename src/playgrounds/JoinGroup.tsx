@@ -9,7 +9,13 @@ import {
 } from 'react'
 import { AnimatePresence, motion, type Variants } from 'framer-motion'
 import { transitionFast, transitionSmooth, fadeBlurIn } from '../lib/motion'
+import { SweepCanvas } from '../components/sweep'
+import { useSweep } from '../components/sweep-context'
 import { cn } from '../lib/utils'
+import { GlowField } from '../components/GlowField'
+import { CheckIcon, CopyIcon, LinkIcon } from '../components/icons'
+import { LinkedInMark, WhatsAppMark, XMark } from '../components/social-marks'
+import { celebrate } from '../lib/confetti'
 import {
   ACCENTS,
   ACCESS,
@@ -23,18 +29,25 @@ import {
   FIELD,
   LABEL,
   PILL,
+  FORM_BACKDROP,
+  LANDING_BACKDROP,
+  SHARE_TARGETS,
+  SWEEP_PALETTE,
   bannerTint,
-  glow,
+  communityLink,
+  communityUrl,
   grain,
   iconColorPalette,
   iconDiscoverSearch,
   iconMedal,
   iconMovieReel,
   iconPencilNib,
+  iconRocket,
   iconTickOff,
   iconTickOn,
   iconVideoGenerate,
   type AccessId,
+  type BackdropSpec,
   type Feature,
 } from '../lib/joinGroup'
 
@@ -87,75 +100,147 @@ const SALT: CSSProperties = { fontFeatureSettings: '"salt" 1' }
 const BOARD = 'max(1200px, 100vw)'
 const board = (fraction: number) => `calc(${BOARD} * ${fraction})`
 
-/** Fractions of the board, straight off the file's coordinates. */
-const GLOW = {
-  x: -56 / 1920,
-  y: -64 / 1920,
-  width: 1065 / 1920,
-  height: 510 / 1920,
-  /* The shape carries a 200px gaussian, so the exported SVG is 400px larger
-     than its node on every side. Both numbers travel together or the blur
-     crops. */
-  bleed: -400 / 1920,
-  imageWidth: 1865 / 1920,
-  imageHeight: 1310 / 1920,
-} as const
-
 const STAGGER: Variants = {
   hidden: {},
   visible: { transition: { delayChildren: 0.08, staggerChildren: 0.09 } },
 }
 
 /**
- * The slide's atmosphere: two mirrored magenta washes across the top, and a
- * grain plate over the whole page.
+ * A screen's atmosphere: two blurred washes and a grain plate over black. The
+ * two screens differ only in the numbers, which live in `BackdropSpec`.
  *
- * The grain is composited with `saturation`, which is what the file specifies
- * and reads as the wrong choice until you see what it does here. The plate is
- * near-white with sparse dark specks; a saturation blend takes only the
- * source's chroma, so white pixels strip the wash to grey and the specks let it
- * through. The result is not a lightening — it is a mottled, half-desaturated
- * glow, which is exactly the texture in the Figma render.
+ * The washes are drawn live by `GlowField` rather than placed as the file's two
+ * exports, so they drift and fold instead of sitting still. The exports remain
+ * as its fallback, and are still the reference for everything the field is
+ * configured with — where the band sits, how strong it is, and the two colours,
+ * which are one shape in two hues: magenta on the left, violet on the right.
+ * They are not interchangeable, and a flipped copy of the left costs the
+ * composition its violet half.
  *
- * The file also puts a 200px backdrop blur on this plate. That is dropped: the
- * glows underneath are already a 200px gaussian, so the second pass moves
- * almost nothing while costing a full-viewport backdrop filter on every paint.
+ * The field renders *under* the blurred plate, which is what makes it cheap
+ * enough to leave running — see `GlowField` for what that buys.
+ *
+ * The grain is composited normally, not with the `saturation` blend the file
+ * asks for. That blend was tried and it is wrong here, for a reason worth
+ * recording: the plate looks like white paper with dark specks in any image
+ * viewer, but that is the viewer compositing it onto white. Measured, its RGB
+ * never exceeds 28 and its alpha averages 7/255 — it is black grain on
+ * transparency. A saturation blend takes the source's chroma, and black has
+ * none, so every speck bleaches the wash under it. Composited normally the
+ * same pixels simply darken, which is what grain is and what the Figma render
+ * shows: full-strength magenta and violet with texture over them.
+ *
+ * Order matters and follows the file: Rectangle 232 sits above both washes, so
+ * its blur, its lift and its grain all fall on the glows rather than under
+ * them. The blur goes on the lift layer and not the grain, because a backdrop
+ * filter only touches what is behind the element — the plate's own fills stay
+ * sharp in Figma too, and blurring the grain would defeat the point of having
+ * it.
+ *
+ * The 200px is doing real work on the landing, which is easy to talk yourself
+ * out of: the form's washes are baked with a 200px gaussian and barely move
+ * under a second pass, but the landing's are baked at 25, so this is what turns
+ * two hard-edged blobs into the soft field the render shows. Same plate, same
+ * number, opposite significance.
  */
-function Backdrop() {
+function Backdrop({ spec }: { spec: BackdropSpec }) {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-      {(['left', 'right'] as const).map(side => (
-        <div
-          key={side}
-          className="absolute"
-          style={{
-            [side]: board(GLOW.x),
-            top: board(GLOW.y),
-            width: board(GLOW.width),
-            height: board(GLOW.height),
-          }}
-        >
-          <img
-            src={glow}
-            alt=""
-            className="absolute max-w-none"
-            style={{
-              left: board(GLOW.bleed),
-              top: board(GLOW.bleed),
-              width: board(GLOW.imageWidth),
-              height: board(GLOW.imageHeight),
-              /* One asset, mirrored — the file draws the right-hand wash as a
-                 flipped copy of the left. */
-              transform: side === 'right' ? 'scaleX(-1)' : undefined,
-            }}
-          />
-        </div>
-      ))}
+      <GlowField
+        {...spec.field}
+        className="absolute inset-0 size-full"
+        fallback={(['left', 'right'] as const).map(side => {
+          const layer = spec[side]
+          const box: CSSProperties = {
+            [side]: board(spec.x),
+            [spec.anchor]: board(spec.offset),
+            width: board(spec.width),
+            height: board(spec.height),
+          }
+          return (
+            <div key={side} className="absolute" style={box}>
+              <img
+                src={layer.asset}
+                alt=""
+                className="absolute max-w-none"
+                style={{
+                  left: board(spec.bleed),
+                  top: board(spec.bleed),
+                  width: board(spec.imageWidth),
+                  height: board(spec.imageHeight),
+                  /* The bleed keeps the image concentric with its node, so a
+                     transform about the image's centre is a transform about the
+                     shape's. */
+                  transform: layer.transform,
+                }}
+              />
+            </div>
+          )
+        })}
+      />
       <div
-        className="absolute inset-0 mix-blend-saturation"
+        className="absolute inset-0 backdrop-blur-[200px]"
+        style={{ backgroundColor: spec.lift }}
+      />
+      <div
+        className="absolute inset-0"
         style={{ backgroundImage: `url(${grain})`, backgroundSize: '1024px 1024px' }}
       />
     </div>
+  )
+}
+
+/**
+ * The landing — node 314:3401. One button on a black page, over a glow band
+ * that is the same pair of shapes flipped onto the bottom edge.
+ *
+ * The button sits at y=1076 of 1428, which is 22.8% of the board's height up
+ * from the bottom measured to its centre. That is held as a fraction of the
+ * viewport rather than of the board, unlike everything in the backdrop: the
+ * glow is a wash whose proportions have to survive, but the button is a control
+ * and wants to stay a thumb's reach off the bottom of whatever window it is in.
+ *
+ * The file's `drop-shadow` is a `box-shadow` here. On an opaque rounded rect
+ * the two are indistinguishable, and `filter` is already spoken for by the
+ * entrance — animating it would blow the shadow away mid-transition.
+ */
+function Landing({ onStart }: { onStart: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={transitionFast}
+      className="font-sohne relative flex min-h-svh w-full items-end justify-center overflow-hidden bg-black px-6 pb-[120px]"
+    >
+      <Backdrop spec={LANDING_BACKDROP} />
+
+      <motion.button
+        type="button"
+        onClick={onStart}
+        variants={fadeBlurIn}
+        initial="hidden"
+        animate="visible"
+        whileTap={{ scale: 0.98 }}
+        className="relative flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-[5px] py-4 pr-7 pl-6"
+        style={{ backgroundColor: ACTION, boxShadow: '0 0 16px rgba(0,0,0,0.32)' }}
+      >
+        <img src={iconRocket} alt="" className="size-5 shrink-0" />
+        {/* The file sets this in Test Söhne Kräftig — normal width. The only
+            bold Söhne cut in the project is Breit, which is the *extended*
+            family and renders this label visibly wider than the design. So
+            this asks the regular cut for weight 600 and takes the browser's
+            synthetic bold: wrong weight rendering, right letterforms and
+            widths, which is the closer of the two misses. Drop
+            TestSohne-Kräftig into src/assets/fonts and this becomes real. */}
+        <span
+          className="font-sohne text-[16px] leading-[1.3] font-semibold tracking-[-0.32px] whitespace-nowrap text-white"
+          style={SALT}
+        >
+          {COPY.getStarted}
+        </span>
+      </motion.button>
+    </motion.div>
   )
 }
 
@@ -418,7 +503,12 @@ function FeatureTile({ feature, accent, on, onToggle }: FeatureTileProps) {
       <span className="flex size-6 shrink-0 items-center justify-center">
         <img src={feature.icon} alt="" className="max-w-none" style={box} />
       </span>
-      <span className="text-center text-[10px] leading-[13px] tracking-[-0.2px]">
+      {/* 14px, like every other string on the page — the file sets these at 10,
+          which is the one place it drops below body size. Leading stays the
+          file's 1.3 ratio and tracking follows the size to -0.28px, and the two
+          longest labels now take a second line, which is what `min-h` and the
+          grid's equal-height rows were already there to absorb. */}
+      <span className="text-center text-[14px] leading-[1.3] tracking-[-0.28px]">
         {feature.label}
       </span>
       {feature.premium && (
@@ -435,7 +525,22 @@ function FeatureTile({ feature, accent, on, onToggle }: FeatureTileProps) {
   )
 }
 
-export function JoinGroup() {
+/**
+ * The form — node 309:977, everything after "Get Started".
+ *
+ * Holds its own state rather than taking it from the parent, which is what
+ * makes "Restart onboarding" a single line: `AnimatePresence` unmounts this on
+ * the way back to the landing, so coming forward again mounts a fresh form.
+ * There is nothing to clear by hand, and no way for a field to survive a
+ * restart because someone forgot to add it to a reset function.
+ */
+function CommunityForm({
+  onRestart,
+  onCreate,
+}: {
+  onRestart: () => void
+  onCreate: (community: Community) => void
+}) {
   const [name, setName] = useState('')
   const [accent, setAccent] = useState<string>(DEFAULT_ACCENT)
   const [access, setAccess] = useState<AccessId>('private')
@@ -445,27 +550,25 @@ export function JoinGroup() {
   const toggle = (id: string) =>
     setPicked(prev => (prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]))
 
-  /* The confirmation is the button's own label for a beat and then it is not.
-     Anything more permanent would need a screen the file does not draw. */
+  /* The label flips and stays flipped: the screen is already leaving under the
+     sweep, and a button that says "Create community" again on its way out reads
+     as the click having been undone. `created` is also the guard against a
+     second submit landing mid-transition. */
   const submit = () => {
     if (created) return
     setCreated(true)
-    window.setTimeout(() => setCreated(false), 1800)
-  }
-
-  /* What the pill on the bottom actually means. Without this it is decoration,
-     and it is the one control on the page whose job is unambiguous. */
-  const restart = () => {
-    setName('')
-    setAccent(DEFAULT_ACCENT)
-    setAccess('private')
-    setPicked([])
-    setCreated(false)
+    onCreate({ name, accent })
   }
 
   return (
-    <div className="font-sohne relative flex min-h-svh w-full items-center justify-center overflow-hidden bg-black px-6 py-16">
-      <Backdrop />
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={transitionFast}
+      className="font-sohne relative flex min-h-svh w-full items-center justify-center overflow-hidden bg-black px-6 py-16 pt-[16px]"
+    >
+      <Backdrop spec={FORM_BACKDROP} />
 
       <motion.div
         variants={STAGGER}
@@ -624,7 +727,7 @@ export function JoinGroup() {
         <motion.button
           variants={fadeBlurIn}
           type="button"
-          onClick={restart}
+          onClick={onRestart}
           whileTap={{ scale: 0.98 }}
           className="flex shrink-0 cursor-pointer items-center gap-2 rounded-[5px] p-2"
           style={{ backgroundColor: PILL }}
@@ -643,6 +746,316 @@ export function JoinGroup() {
           </span>
         </motion.button>
       </motion.div>
+    </motion.div>
+  )
+}
+
+/** What the form hands forward: everything the third screen needs to say. */
+type Community = { name: string; accent: string }
+
+type Stage = 'landing' | 'form' | 'created'
+
+/** The three marks, by the id their share target carries. */
+const MARKS = { x: XMark, linkedin: LinkedInMark, whatsapp: WhatsAppMark } as const
+
+/**
+ * The third screen — the community exists, here is its address.
+ *
+ * Not in the file, which draws the landing and the form and stops at the button.
+ * It is built out of what the form already established so it reads as the same
+ * product rather than a success page bolted on: the same 558px column, the same
+ * header shape (48px badge, Breit title, dimmed line), the same card, and the
+ * community's own accent on the badge and the copy button — the colour the
+ * creator picked two screens ago is what confirms this one is theirs.
+ *
+ * The link is shown without its scheme and copied with it. What is on screen is
+ * for reading; what lands on the clipboard has to be pasteable.
+ */
+function CommunityCreated({
+  community,
+  onRestart,
+}: {
+  community: Community
+  onRestart: () => void
+}) {
+  const { name, accent } = community
+  const url = communityUrl(name)
+  const label = name.trim() || COPY.created.fallbackName
+  const [copied, setCopied] = useState(false)
+
+  /* The screen mounts *under* the sweep band — that is the whole point of the
+     midpoint swap — so firing immediately would spend the opening burst behind
+     it. 260ms is the band clearing the frame. */
+  useEffect(() => {
+    let stop = () => {}
+    const timer = window.setTimeout(() => {
+      stop = celebrate([accent, LANDING_BACKDROP.field.colorA, LANDING_BACKDROP.field.colorB, '#ffffff'])
+    }, 260)
+
+    return () => {
+      window.clearTimeout(timer)
+      stop()
+    }
+  }, [accent])
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1800)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const copy = async () => {
+    /* The clipboard is permissioned and can simply refuse — an insecure origin,
+       a denied prompt. Failing quietly leaves the label alone, which is honest:
+       nothing was copied, so nothing should say it was. */
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={transitionFast}
+      className="font-sohne relative flex min-h-svh w-full items-center justify-center overflow-hidden bg-black px-6 py-16"
+    >
+      <Backdrop spec={FORM_BACKDROP} />
+
+      <motion.div
+        variants={STAGGER}
+        initial="hidden"
+        animate="visible"
+        className="relative flex w-[558px] max-w-full flex-col items-center gap-10"
+      >
+        {/* ---- Header ---- */}
+        <motion.header variants={fadeBlurIn} className="flex w-full flex-col items-center gap-3">
+          <motion.div
+            className="flex size-12 shrink-0 items-center justify-center rounded-full text-white"
+            animate={{ backgroundColor: accent }}
+            transition={transitionSmooth}
+          >
+            <span className="[&>svg]:size-6">
+              <CheckIcon />
+            </span>
+          </motion.div>
+          <div className="flex flex-col items-center gap-2 text-center">
+            <h1
+              className="font-sohne-breit text-[16px] leading-[1.2] tracking-[-0.32px] text-white"
+              style={SALT}
+            >
+              {COPY.created.title}
+            </h1>
+            <p
+              className="w-[499px] max-w-full text-[14px] leading-[1.7] tracking-[-0.28px]"
+              style={{ color: LABEL }}
+            >
+              {COPY.created.blurb}
+            </p>
+          </div>
+        </motion.header>
+
+        {/* ---- The link, and where to send it ---- */}
+        <motion.div
+          variants={fadeBlurIn}
+          className="flex w-full flex-col gap-8 rounded-[10px] p-6"
+          style={{ backgroundColor: CARD }}
+        >
+          <Field label={COPY.created.linkLabel} gap="gap-2">
+            <div className="flex w-full items-center gap-2">
+              {/* Same 48px field the name input uses, so the link sits in the
+                  box the creator typed the name into a screen ago. */}
+              <div
+                className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-[5px] border px-3"
+                style={{ backgroundColor: FIELD, borderColor: EDGE }}
+              >
+                <span className="shrink-0" style={{ color: LABEL }}>
+                  <LinkIcon />
+                </span>
+                {/* `truncate` from the tail end: a long slug should lose its
+                    middle-of-the-name characters, never the host. */}
+                <span className="min-w-0 flex-1 truncate text-[14px] leading-[1.25] tracking-[-0.28px] text-white">
+                  {communityLink(name)}
+                </span>
+              </div>
+
+              <motion.button
+                type="button"
+                onClick={copy}
+                whileTap={{ scale: 0.98 }}
+                transition={transitionFast}
+                aria-label={copied ? COPY.created.copied : COPY.created.copy}
+                className="flex h-12 shrink-0 cursor-pointer items-center gap-2 rounded-[5px] px-5 text-[14px] leading-[1.25] tracking-[-0.28px] whitespace-nowrap text-white"
+                style={{ backgroundColor: ACTION }}
+              >
+                {/* `mode="wait"` for the same reason the submit button uses it:
+                    one line of box, two labels, no overlap. */}
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={copied ? 'copied' : 'idle'}
+                    variants={fadeBlurIn}
+                    initial="hidden"
+                    animate="visible"
+                    exit="hidden"
+                    transition={transitionFast}
+                    className="flex items-center gap-2"
+                  >
+                    {copied ? <CheckIcon /> : <CopyIcon />}
+                    {copied ? COPY.created.copied : COPY.created.copy}
+                  </motion.span>
+                </AnimatePresence>
+              </motion.button>
+            </div>
+          </Field>
+
+          {/* The three, as one control rather than three buttons in a row: a
+              single bordered box with hairlines between the cells, which is how
+              the access rows are grouped upstairs. */}
+          <div className="flex w-full flex-col items-center gap-3">
+            <span
+              className="text-[14px] leading-[1.25] tracking-[-0.28px]"
+              style={{ color: LABEL }}
+            >
+              {COPY.created.shareLabel}
+            </span>
+            <div
+              className="flex overflow-hidden rounded-[5px] border"
+              style={{ backgroundColor: FIELD, borderColor: EDGE }}
+            >
+              {SHARE_TARGETS.map((target, index) => {
+                const Mark = MARKS[target.id]
+                return (
+                  <Fragment key={target.id}>
+                    {index > 0 && (
+                      <div className="w-px shrink-0" style={{ backgroundColor: EDGE }} />
+                    )}
+                    <motion.a
+                      href={target.href(url, label)}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={target.label}
+                      title={target.label}
+                      whileHover={{ color: '#ffffff' }}
+                      whileTap={{ scale: 0.94 }}
+                      transition={transitionFast}
+                      className="flex size-12 cursor-pointer items-center justify-center"
+                      style={{ color: LABEL }}
+                    >
+                      <Mark className="size-[18px]" />
+                    </motion.a>
+                  </Fragment>
+                )
+              })}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* ---- Restart ---- */}
+        <motion.button
+          variants={fadeBlurIn}
+          type="button"
+          onClick={onRestart}
+          whileTap={{ scale: 0.98 }}
+          className="flex shrink-0 cursor-pointer items-center gap-2 rounded-[5px] p-2"
+          style={{ backgroundColor: PILL }}
+        >
+          <img src={iconDiscoverSearch} alt="" className="size-4 shrink-0" />
+          <span
+            className="pr-2 whitespace-nowrap text-[14px] leading-4 tracking-[-0.28px]"
+            style={{ color: LABEL }}
+          >
+            {COPY.restart}
+          </span>
+        </motion.button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+/**
+ * The onboarding, in three screens: the landing, the form, then the community.
+ *
+ * `mode="wait"` rather than a crossfade. The two screens are the same black
+ * page with the glow band at opposite ends, so overlapping them slides one
+ * band past the other through the middle of the frame — which reads as a
+ * mistake rather than a transition. Letting the first leave before the second
+ * arrives keeps the glow where each screen puts it.
+ */
+export function JoinGroup() {
+  const [stage, setStage] = useState<Stage>('landing')
+  /* Lives here rather than in the form, because the form is the thing being
+     unmounted when this is needed. */
+  const [community, setCommunity] = useState<Community>({ name: '', accent: DEFAULT_ACCENT })
+  const sweep = useSweep()
+
+  /**
+   * The screen change rides a glimm band rather than happening on its own.
+   *
+   * Direction follows the glow. The landing hangs its light off the bottom
+   * edge and the form hangs the same two shapes off the top, so going forward
+   * is the band carrying that light up the page ('btt') and restarting is it
+   * setting back down ('ttb'). A left-to-right sweep would cross both bands
+   * sideways and read as unrelated to either screen. The created screen keeps
+   * the form's backdrop, so form → created is more of the same climb.
+   *
+   * `setStage` runs at the band's midpoint, under the brightest part of it —
+   * which is also what makes `mode="wait"` survive here. The two screens cross
+   * fade through black for 280ms each way, and that swap now happens behind
+   * the band instead of in the open.
+   */
+  const go = (next: Stage) =>
+    sweep(() => setStage(next), {
+      palette: SWEEP_PALETTE,
+      direction: next === 'landing' ? 'ttb' : 'btt',
+      // The band is a cut, not a scene. `easeInOutQuint` spends the middle
+      // of that budget fast and softens only the entry and exit, so the
+      // crossing itself is the quick part — an ease-out curve would whip
+      // the band in and then leave it crawling through the last tenth of
+      // its travel, which reads as slower than a longer linear sweep.
+      sweepMs: 420,
+      outroMs: 220,
+      easing: 'easeInOutQuint',
+      // glimm tests this against *eased* progress, not elapsed time. 0.5 is
+      // the band over the middle of the frame, and quint is symmetric, so
+      // that is also the halfway point in wall-clock — the swap lands under
+      // the brightest part of the band with the outro as its tail.
+      midpoint: 0.5,
+      // Pure black under two saturated hues: full brightness blows the
+      // crest out to white. `bandTight` is the gaussian's falloff, so lower
+      // is wider — 18 against the house 24 keeps the band broad enough to
+      // still be covering the frame while the two screens cross-fade.
+      brightness: 0.85,
+      bandTight: 18,
+    })
+
+  return (
+    /* Stable parent for the sweep canvas: `SweepCanvas` mounts absolutely
+       inside it, so it has to outlive the screen being swapped out. */
+    <div className="relative flex min-h-svh w-full flex-col">
+      <AnimatePresence mode="wait">
+        {stage === 'landing' ? (
+          <Landing key="landing" onStart={() => go('form')} />
+        ) : stage === 'form' ? (
+          <CommunityForm
+            key="form"
+            onRestart={() => go('landing')}
+            onCreate={next => {
+              /* Set before the sweep, not at its midpoint: the form is still on
+                 screen and nothing reads this until the next one mounts. */
+              setCommunity(next)
+              go('created')
+            }}
+          />
+        ) : (
+          <CommunityCreated key="created" community={community} onRestart={() => go('landing')} />
+        )}
+      </AnimatePresence>
+
+      <SweepCanvas />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { MembershipDashboard } from './MembershipDashboard'
 import { Move } from './Move'
 import { ChatView } from './ChatView'
 import { JoinGroup } from './JoinGroup'
+import { WritersGarden } from './WritersGarden'
 
 export type Playground = {
   /** Also the URL hash: `#/article-reader`. Keep it kebab-case and stable. */
@@ -25,6 +26,7 @@ export const playgrounds: Playground[] = [
   { id: 'movie-choice', label: 'Movie Choice', Component: Move },
   { id: 'chat-view', label: 'Chat View', Component: ChatView },
   { id: 'join-group', label: 'Join Group', Component: JoinGroup },
+  { id: 'writers-garden', label: 'Writers Garden', Component: WritersGarden },
 ]
 
 export const defaultPlaygroundId = playgrounds[0].id

@@ -121,3 +121,65 @@ export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
     </svg>
   )
 }
+
+/* ---- Join Group: the created screen's three utility glyphs ----
+   16px, 1.5px stroke, `currentColor` — the same construction as `ChevronIcon`
+   above, so they sit on the same optical weight as the rest of the set. */
+
+export function LinkIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M6.75 9.25a2.75 2.75 0 0 0 3.89 0l1.86-1.86a2.75 2.75 0 1 0-3.89-3.89l-.75.75"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.25 6.75a2.75 2.75 0 0 0-3.89 0L3.5 8.61a2.75 2.75 0 1 0 3.89 3.89l.75-.75"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function CopyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect
+        x="6.25"
+        y="6.25"
+        width="7.5"
+        height="7.5"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M10.25 6.25V4.5a2 2 0 0 0-2-2H4.5a2 2 0 0 0-2 2v3.75a2 2 0 0 0 2 2h1.75"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function CheckIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="m3.5 8.5 3 3 6-7"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}

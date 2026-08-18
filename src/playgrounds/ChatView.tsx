@@ -236,10 +236,12 @@ function GhostConversation({ thread }: { thread: OpenThread }) {
       transition={{ staggerChildren: 0.04 }}
       className="absolute top-0 left-[268px] flex h-[912px] w-[1080px] flex-col"
     >
-      {/* Header, in the 44px band the design's rule already closes. */}
+      {/* Header, in the 44px band the design's rule already closes. Same 20px
+          left gutter the ghost frames use, so the contact's avatar starts where
+          every other destination's title icon does. */}
       <motion.header
         variants={fadeBlurIn}
-        className="flex h-11 shrink-0 items-center justify-between px-6"
+        className="flex h-11 shrink-0 items-center justify-between pr-6 pl-[20px]"
       >
         <div className="flex items-center gap-2.5">
           <img
@@ -381,14 +383,13 @@ export function ChatView() {
         className="relative shrink-0 overflow-hidden bg-white font-sohne"
         style={{ ...STAGE, transform: `scale(${scale})`, transformOrigin: 'top left' }}
       >
-        {/* Bezel, outer then inner. Both are stroke-only rectangles rounded at
-            the top alone — the bottom of the laptop is off the artboard. */}
+        {/* Bezel: a stroke-only rectangle rounded at the top alone — the bottom
+            of the laptop is off the artboard. The file draws a second, inner
+            rect at (151, 111) as well; at this scale it reads as a doubled edge
+            around the glass rather than as machined metal, so only the outer one
+            is drawn. */}
         <div
           className="absolute top-[104px] left-[142px] h-[980px] w-[1410px] rounded-t-[20px]"
-          style={{ border: `1.5px solid ${BEZEL}` }}
-        />
-        <div
-          className="absolute top-[111px] left-[151px] h-[973px] w-[1392px] rounded-t-[13px]"
           style={{ border: `1.5px solid ${BEZEL}` }}
         />
 
