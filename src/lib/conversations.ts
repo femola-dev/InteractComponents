@@ -81,13 +81,18 @@ export const GROUPS: NavLink[] = [
  * The app rail. Both cuts of each icon ship from Figma with the selected chip —
  * `#eef0f7` fill plus a hairline — already drawn into the active file, so
  * selection here is an asset swap rather than a background this code paints.
+ *
+ * `label` names the destination for the rail's tooltip-sized world — it is what
+ * the icon is — while `title` is the heading the destination writes at the top
+ * of its own column and pane. Messages calls itself "Conversations" there, and
+ * the other four follow the same pattern, so the two cannot be one field.
  */
-export type RailItem = { label: string; active: string; inactive: string }
+export type RailItem = { label: string; title: string; active: string; inactive: string }
 
 export const RAIL_ITEMS: RailItem[] = [
-  { label: 'Messages', active: railMessageActive, inactive: railMessageInactive },
-  { label: 'Video', active: railVideoActive, inactive: railVideoInactive },
-  { label: 'Jobs', active: railJobActive, inactive: railJobInactive },
-  { label: 'Charts', active: railChartActive, inactive: railChartInactive },
-  { label: 'Settings', active: railSettingsActive, inactive: railSettingsInactive },
+  { label: 'Messages', title: 'Conversations', active: railMessageActive, inactive: railMessageInactive },
+  { label: 'Video', title: 'Video Call', active: railVideoActive, inactive: railVideoInactive },
+  { label: 'Jobs', title: 'Open Jobs', active: railJobActive, inactive: railJobInactive },
+  { label: 'Charts', title: 'Business Chart', active: railChartActive, inactive: railChartInactive },
+  { label: 'Settings', title: 'Settings', active: railSettingsActive, inactive: railSettingsInactive },
 ]

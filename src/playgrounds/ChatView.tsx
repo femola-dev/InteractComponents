@@ -10,6 +10,20 @@ import {
   type Chat,
   type NavLink,
 } from '../lib/conversations'
+import {
+  CHIP,
+  GHOST_IN,
+  GHOST_OUT,
+  GROOVE,
+  HAIRLINE,
+  INK,
+  MUTED,
+  RAIL_SHADOW,
+  RING,
+  SALT,
+} from '../lib/chatShell'
+import { ChipButton, Ghost, SectionHeading } from '../components/ChatShell'
+import { RailGhostView } from '../components/RailGhostViews'
 
 import iconLogo from '../assets/icons/Logo.svg'
 import iconBorderSmall from '../assets/icons/Border Small.svg'
@@ -41,27 +55,14 @@ import avatarCurrentUser from '../assets/images/avatars/current-user.jpg'
  * and scales the whole thing to cover the viewport, rather than making any of it
  * responsive. Nothing inside reflows — a wider window shows the design bigger,
  * never rearranged.
+ *
+ * The file only draws the Messages destination. The other four rail items get
+ * ghost frames of their own (`RailGhostViews`) rather than leaving the
+ * conversation on screen under a different lit glyph.
  */
 const STAGE = { width: 1440, height: 1024 } as const
 
-/* Söhne's stylistic alternates — the single-storey `a` and straight-tailed `l`
-   the design's labels are set with. */
-const SALT = { fontFeatureSettings: '"salt" 1' } as const
-
-const INK = '#212c46'
-const MUTED = '#7f869d'
-const HAIRLINE = '#d5d9e7'
 const BEZEL = '#ccc'
-const CHIP = '#eef0f7'
-const CHIP_RING = 'rgba(202,206,223,0.4)'
-
-/* A 1px rule with a white line under it: the design carves its dividers into
-   the #f8f9fd canvas rather than drawing them on top, and the highlight is what
-   sells the groove. The vertical rule at x=267 deliberately has none. */
-const GROOVE = '0px 1px 0px 0px rgba(255,255,255,0.8)'
-
-const RAIL_SHADOW =
-  '0px 2px 8px -2px rgba(0,14,43,0.08), 0px 0px 1px 0px rgba(131,138,152,0.1), 0px 1px 2px 0px rgba(0,14,43,0.1)'
 
 /* Two lifts and three inner lights — the badge is drawn as a physical bead, and
    dropping the insets flattens it into a red circle. */
@@ -78,12 +79,6 @@ const BADGE_SHADOW = [
  * not swing past it. Same tuning the Membership sidebar's pill uses.
  */
 const PILL_SPRING = { type: 'spring', stiffness: 500, damping: 40, mass: 0.6 } as const
-
-/* Placeholder fills. Incoming reuses the sidebar's chip so the ghost thread
-   reads as the same material as the rest of the app; outgoing is one step
-   deeper, which is the whole of the sent/received distinction here. */
-const GHOST_IN = CHIP
-const GHOST_OUT = '#e2e7f4'
 
 /**
  * The shape of a stand-in conversation: bubble side and box, in order, oldest
@@ -165,27 +160,6 @@ function PresenceDot({ presence }: { presence: Chat['presence'] }) {
   )
 }
 
-/** A 20px chip button — the header's preferences, new-message and call controls. */
-function ChipButton({
-  label,
-  children,
-  className = '',
-}: {
-  label: string
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      className={`relative flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-[4px] transition-opacity duration-150 hover:opacity-70 ${className}`}
-    >
-      {children}
-    </button>
-  )
-}
-
 type RowProps = {
   /**
    * Which chip this row competes for. The sidebar runs two independent
@@ -219,7 +193,7 @@ function SidebarRow({ chipId, isSelected, onSelect, icon, label }: RowProps) {
           transition={PILL_SPRING}
           aria-hidden
           className="absolute inset-0 rounded-[6px]"
-          style={{ backgroundColor: CHIP, boxShadow: `inset 0 0 0 0.5px ${CHIP_RING}` }}
+          style={{ backgroundColor: CHIP, boxShadow: RING }}
         />
       )}
       {/* Sits above the chip, and gives the presence dot something unclipped to
@@ -233,30 +207,6 @@ function SidebarRow({ chipId, isSelected, onSelect, icon, label }: RowProps) {
       </span>
     </button>
   )
-}
-
-/**
- * `PINNED CHATS` / `GROUPS` — Söhne Mono, and the only monospaced text here.
- * The pinned heading is 20px tall to clear its overflow button; the groups
- * heading has no button and is 16.
- */
-function SectionHeading({ label, action }: { label: string; action?: ReactNode }) {
-  return (
-    <div className={`flex w-full shrink-0 items-center ${action ? 'h-5 gap-2' : 'h-4'}`}>
-      <p
-        className="min-w-0 flex-1 text-[12px] leading-4 tracking-[-0.24px]"
-        style={{ color: MUTED, fontFamily: 'var(--font-sohne-mono)' }}
-      >
-        {label}
-      </p>
-      {action}
-    </div>
-  )
-}
-
-/** A placeholder block. Rounded, filled, and deliberately without content. */
-function Ghost({ className = '', fill = GHOST_IN }: { className?: string; fill?: string }) {
-  return <div aria-hidden className={className} style={{ backgroundColor: fill }} />
 }
 
 type OpenThread = { name: string; avatar?: string; icon?: string; seed: number }
@@ -347,7 +297,7 @@ function GhostConversation({ thread }: { thread: OpenThread }) {
                     width: message.w,
                     height: message.h,
                     backgroundColor: isIncoming ? GHOST_IN : GHOST_OUT,
-                    boxShadow: `inset 0 0 0 0.5px ${CHIP_RING}`,
+                    boxShadow: RING,
                   }}
                 />
               </motion.div>
@@ -360,7 +310,7 @@ function GhostConversation({ thread }: { thread: OpenThread }) {
       <motion.div variants={fadeBlurIn} className="flex shrink-0 justify-center pb-6">
         <div
           className="flex h-11 w-[760px] items-center gap-3 rounded-[12px] bg-white px-3"
-          style={{ boxShadow: `inset 0 0 0 0.5px ${CHIP_RING}, ${RAIL_SHADOW}` }}
+          style={{ boxShadow: `${RING}, ${RAIL_SHADOW}` }}
         >
           <Ghost className="size-5 shrink-0 rounded-[5px]" />
           <Ghost className="h-2 flex-1 rounded-full" />
@@ -373,13 +323,17 @@ function GhostConversation({ thread }: { thread: OpenThread }) {
 
 export function ChatView() {
   const { ref, scale } = useCoverScale(STAGE.width, STAGE.height)
-  const [rail, setRail] = useState(RAIL_ITEMS[0].label)
+  /* The whole rail item, not its label: every destination writes its own title
+     at the top of the column and the pane, so the frame needs the record. */
+  const [rail, setRail] = useState(RAIL_ITEMS[0])
   /* Two selections, not one. The view is which list you are looking at; the
      thread is which conversation is open inside it. On "My inbox" both are lit
      at once — the filter, and the contact whose thread fills the pane. */
   const [view, setView] = useState(INBOX_LINKS[0].label)
   const [openThread, setOpenThread] = useState(PINNED_CHATS[0].name)
   const [query, setQuery] = useState('')
+
+  const isMessages = rail.label === RAIL_ITEMS[0].label
 
   const open = useMemo<OpenThread | null>(() => {
     const chatIndex = PINNED_CHATS.findIndex(c => c.name === openThread)
@@ -457,14 +411,14 @@ export function ChatView() {
 
                 <div className="flex flex-col gap-1">
                   {RAIL_ITEMS.map(item => {
-                    const isActive = rail === item.label
+                    const isActive = rail.label === item.label
                     return (
                       <button
                         key={item.label}
                         type="button"
-                        aria-label={item.label}
+                        aria-label={item.title}
                         aria-current={isActive ? 'page' : undefined}
-                        onClick={() => setRail(item.label)}
+                        onClick={() => setRail(item)}
                         className="relative size-6 shrink-0 cursor-pointer rounded-[5px]"
                       >
                         {/* Both cuts stay mounted and cross-fade. Swapping `src`
@@ -513,160 +467,170 @@ export function ChatView() {
               </div>
             </nav>
 
-            {/* ---- Conversations column, at (44, 12), 223 wide ---- */}
-            <motion.div
-              initial="hidden"
-              animate="visible"
-              transition={{ staggerChildren: 0.06, delayChildren: 0.15 }}
-              className="absolute top-3 left-[44px] flex w-[223px] flex-col gap-1"
-            >
-              {/* Title, search, and the two actions */}
-              <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-2">
-                <div className="flex h-6 items-center justify-between px-3 py-0.5">
-                  <p
-                    className="text-[12px] leading-4 font-semibold tracking-[-0.36px]"
-                    style={{ color: MUTED, fontFamily: 'var(--font-sohne-breit)' }}
-                  >
-                    Conversations
-                  </p>
-                  <ChipButton label="Preferences" className="bg-[#eef0f7]">
-                    <span
-                      aria-hidden
-                      className="absolute inset-0 rounded-[4px]"
-                      style={{ boxShadow: `inset 0 0 0 0.5px ${CHIP_RING}` }}
-                    />
-                    <img src={iconPreferences} alt="" aria-hidden className="relative size-3" />
-                    {/* Unread count. Overhangs the chip's top-right corner. */}
-                    <span
-                      className="absolute -top-1 -right-1 flex size-[10px] items-center justify-center rounded-full bg-[#da0000] text-[6px] leading-none tracking-[-0.12px] text-white"
-                      style={{ boxShadow: BADGE_SHADOW }}
-                    >
-                      2
-                    </span>
-                  </ChipButton>
-                </div>
+            {/* Everything right of the rail belongs to whichever destination is
+                lit. Keyed on the rail item so switching replays its entrance —
+                the frame arriving is the feedback for the click, the same way
+                the conversation pane answers picking a contact. */}
+            {isMessages ? (
+              <>
+                {/* ---- Conversations column, at (44, 12), 223 wide ---- */}
+                <motion.div
+                  initial="hidden"
+                  animate="visible"
+                  transition={{ staggerChildren: 0.06, delayChildren: 0.15 }}
+                  className="absolute top-3 left-[44px] flex w-[223px] flex-col gap-1"
+                >
+                  {/* Title, search, and the two actions */}
+                  <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-2">
+                    <div className="flex h-6 items-center justify-between px-3 py-0.5">
+                      <p
+                        className="text-[12px] leading-4 font-semibold tracking-[-0.36px]"
+                        style={{ color: MUTED, fontFamily: 'var(--font-sohne-breit)' }}
+                      >
+                        {rail.title}
+                      </p>
+                      <ChipButton label="Preferences" className="bg-[#eef0f7]">
+                        <span
+                          aria-hidden
+                          className="absolute inset-0 rounded-[4px]"
+                          style={{ boxShadow: RING }}
+                        />
+                        <img src={iconPreferences} alt="" aria-hidden className="relative size-3" />
+                        {/* Unread count. Overhangs the chip's top-right corner. */}
+                        <span
+                          className="absolute -top-1 -right-1 flex size-[10px] items-center justify-center rounded-full bg-[#da0000] text-[6px] leading-none tracking-[-0.12px] text-white"
+                          style={{ boxShadow: BADGE_SHADOW }}
+                        >
+                          2
+                        </span>
+                      </ChipButton>
+                    </div>
 
-                <div className="h-px w-full" style={{ backgroundColor: HAIRLINE, boxShadow: GROOVE }} />
+                    <div className="h-px w-full" style={{ backgroundColor: HAIRLINE, boxShadow: GROOVE }} />
 
-                {/* The field grows into whatever the two buttons leave — 151px
-                    at this column width. It is `flex-1`, not the 131px fixed
-                    box it used to be, so the gap between it and the buttons is a
-                    real 4px gap rather than slack from `justify-between`. */}
-                <div className="flex items-center gap-1 px-3 py-1">
-                  <label
-                    className="flex h-5 min-w-0 flex-1 cursor-text items-center gap-0.5 rounded-[5px] px-1"
-                    style={{ backgroundColor: CHIP, boxShadow: `inset 0 0 0 0.5px ${CHIP_RING}` }}
-                  >
-                    <img src={iconSearch} alt="" aria-hidden className="size-4 shrink-0" />
-                    <input
-                      value={query}
-                      onChange={e => setQuery(e.target.value)}
-                      placeholder="Search....."
-                      aria-label="Search conversations"
-                      className="min-w-0 flex-1 bg-transparent text-[10px] leading-none tracking-[-0.3px] outline-none placeholder:text-[rgba(121,127,146,0.4)]"
-                      style={{ color: INK }}
-                    />
-                  </label>
+                    {/* The field grows into whatever the two buttons leave — 151px
+                        at this column width. It is `flex-1`, not the 131px fixed
+                        box it used to be, so the gap between it and the buttons is a
+                        real 4px gap rather than slack from `justify-between`. */}
+                    <div className="flex items-center gap-1 px-3 py-1">
+                      <label
+                        className="flex h-5 min-w-0 flex-1 cursor-text items-center gap-0.5 rounded-[5px] px-1"
+                        style={{ backgroundColor: CHIP, boxShadow: RING }}
+                      >
+                        <img src={iconSearch} alt="" aria-hidden className="size-4 shrink-0" />
+                        <input
+                          value={query}
+                          onChange={e => setQuery(e.target.value)}
+                          placeholder="Search....."
+                          aria-label="Search conversations"
+                          className="min-w-0 flex-1 bg-transparent text-[10px] leading-none tracking-[-0.3px] outline-none placeholder:text-[rgba(121,127,146,0.4)]"
+                          style={{ color: INK }}
+                        />
+                      </label>
 
-                  <div className="flex shrink-0 items-center gap-1">
-                    {/* Both ship from Figma as the finished 20px control — chip
-                        fill and hairline are inside the SVG, so there is nothing
-                        for this code to paint around them. */}
-                    <ChipButton label="New message">
-                      <img src={iconNewMessage} alt="" aria-hidden className="size-[21px] max-w-none" />
-                    </ChipButton>
-                    <ChipButton label="Start a call">
-                      <img src={iconPhoneCall} alt="" aria-hidden className="size-[21px] max-w-none" />
-                    </ChipButton>
-                  </div>
-                </div>
-              </motion.div>
-
-              <div className="flex w-full flex-col gap-4">
-                {matches.links.length > 0 && (
-                  <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-1.5 px-3 py-2">
-                    {matches.links.map(link => (
-                      <SidebarRow
-                        key={link.label}
-                        chipId="chat-view-chip"
-                        isSelected={view === link.label}
-                        onSelect={() => setView(link.label)}
-                        label={link.label}
-                        icon={<NavIcon link={link} />}
-                      />
-                    ))}
-                  </motion.div>
-                )}
-
-                {matches.chats.length > 0 && (
-                  <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-1.5 px-3 py-2">
-                    <SectionHeading
-                      label="PINNED CHATS"
-                      action={
-                        <ChipButton label="Pinned chat options">
-                          <img src={iconInfoMenu} alt="" aria-hidden className="h-[2px] w-[9px] max-w-none" />
+                      <div className="flex shrink-0 items-center gap-1">
+                        {/* Both ship from Figma as the finished 20px control — chip
+                            fill and hairline are inside the SVG, so there is nothing
+                            for this code to paint around them. */}
+                        <ChipButton label="New message">
+                          <img src={iconNewMessage} alt="" aria-hidden className="size-[21px] max-w-none" />
                         </ChipButton>
-                      }
-                    />
-                    {matches.chats.map(chat => (
-                      <SidebarRow
-                        key={chat.name}
-                        chipId="chat-thread-chip"
-                        isSelected={openThread === chat.name}
-                        onSelect={() => setOpenThread(chat.name)}
-                        label={chat.name}
-                        icon={
-                          <>
-                            <img src={chat.avatar} alt="" aria-hidden className="size-4 rounded-full object-cover" />
-                            <PresenceDot presence={chat.presence} />
-                          </>
-                        }
-                      />
-                    ))}
+                        <ChipButton label="Start a call">
+                          <img src={iconPhoneCall} alt="" aria-hidden className="size-[21px] max-w-none" />
+                        </ChipButton>
+                      </div>
+                    </div>
                   </motion.div>
-                )}
 
-                {matches.groups.length > 0 && (
-                  <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-1.5 px-3 py-1">
-                    <SectionHeading label="GROUPS" />
-                    {matches.groups.map(group => (
-                      <SidebarRow
-                        key={group.label}
-                        chipId="chat-thread-chip"
-                        isSelected={openThread === group.label}
-                        onSelect={() => setOpenThread(group.label)}
-                        label={group.label}
-                        icon={<NavIcon link={group} />}
-                      />
-                    ))}
-                  </motion.div>
-                )}
+                  <div className="flex w-full flex-col gap-4">
+                    {matches.links.length > 0 && (
+                      <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-1.5 px-3 py-2">
+                        {matches.links.map(link => (
+                          <SidebarRow
+                            key={link.label}
+                            chipId="chat-view-chip"
+                            isSelected={view === link.label}
+                            onSelect={() => setView(link.label)}
+                            label={link.label}
+                            icon={<NavIcon link={link} />}
+                          />
+                        ))}
+                      </motion.div>
+                    )}
 
-                {empty && (
-                  <motion.p
-                    variants={fadeBlurIn}
-                    className="px-4 pt-2 text-[12px] leading-4 tracking-[-0.24px]"
-                    style={{ ...SALT, color: MUTED }}
-                  >
-                    No matches for “{query.trim()}”
-                  </motion.p>
-                )}
-              </div>
-            </motion.div>
+                    {matches.chats.length > 0 && (
+                      <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-1.5 px-3 py-2">
+                        <SectionHeading
+                          label="PINNED CHATS"
+                          action={
+                            <ChipButton label="Pinned chat options">
+                              <img src={iconInfoMenu} alt="" aria-hidden className="h-[2px] w-[9px] max-w-none" />
+                            </ChipButton>
+                          }
+                        />
+                        {matches.chats.map(chat => (
+                          <SidebarRow
+                            key={chat.name}
+                            chipId="chat-thread-chip"
+                            isSelected={openThread === chat.name}
+                            onSelect={() => setOpenThread(chat.name)}
+                            label={chat.name}
+                            icon={
+                              <>
+                                <img src={chat.avatar} alt="" aria-hidden className="size-4 rounded-full object-cover" />
+                                <PresenceDot presence={chat.presence} />
+                              </>
+                            }
+                          />
+                        ))}
+                      </motion.div>
+                    )}
+
+                    {matches.groups.length > 0 && (
+                      <motion.div variants={fadeBlurIn} className="flex w-full flex-col gap-1.5 px-3 py-1">
+                        <SectionHeading label="GROUPS" />
+                        {matches.groups.map(group => (
+                          <SidebarRow
+                            key={group.label}
+                            chipId="chat-thread-chip"
+                            isSelected={openThread === group.label}
+                            onSelect={() => setOpenThread(group.label)}
+                            label={group.label}
+                            icon={<NavIcon link={group} />}
+                          />
+                        ))}
+                      </motion.div>
+                    )}
+
+                    {empty && (
+                      <motion.p
+                        variants={fadeBlurIn}
+                        className="px-4 pt-2 text-[12px] leading-4 tracking-[-0.24px]"
+                        style={{ ...SALT, color: MUTED }}
+                      >
+                        No matches for “{query.trim()}”
+                      </motion.p>
+                    )}
+                  </div>
+                </motion.div>
+
+                {/* The conversation, when one is open. Empty in the design, and
+                    still empty on every view but "My inbox". */}
+                {/* Keyed on the contact so picking a different one remounts the
+                    pane and replays its stagger — the thread arriving is the
+                    feedback for the click. */}
+                {conversation && <GhostConversation key={conversation.name} thread={conversation} />}
+              </>
+            ) : (
+              <RailGhostView key={rail.label} item={rail} />
+            )}
 
             {/* Column rule, full height and grooveless. */}
             <div className="absolute top-0 left-[267px] h-[1080px] w-px" style={{ backgroundColor: HAIRLINE }} />
 
-            {/* The conversation, when one is open. Empty in the design, and
-                still empty on every view but "My inbox". */}
-            {/* Keyed on the contact so picking a different one remounts the
-                pane and replays its stagger — the thread arriving is the
-                feedback for the click. */}
-            {conversation && <GhostConversation key={conversation.name} thread={conversation} />}
-
             {/* Main pane header rule. 1202px wide, so it runs to the app's right
                 edge and disappears behind the bezel. Drawn last so it closes the
-                conversation header from on top. */}
+                pane's header from on top, whichever destination drew it. */}
             <div
               className="absolute top-[44px] left-[268px] h-px w-[1202px]"
               style={{ backgroundColor: HAIRLINE, boxShadow: GROOVE }}
