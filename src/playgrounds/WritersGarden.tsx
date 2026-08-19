@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type RefObject,
 } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { gsap } from 'gsap'
@@ -24,7 +25,9 @@ import {
   GHOST_REST_Y,
   GHOST_SIZE,
   GHOST_TRACKING,
+  LAYOUTS,
   MUTED,
+  PAGE,
   PANEL_BADGE,
   PANEL_BADGE_BACK,
   PANEL_BADGE_IMG,
@@ -48,12 +51,15 @@ import {
   TILE_PITCH,
   TILE_RADIUS,
   TILE_W,
+  VERTICAL_PITCH,
   iconArrowUpRight,
   iconDotGrid,
   type Badge,
+  type LayoutMode,
 } from '../lib/writersGarden'
 import { ease, springMorph } from '../lib/motion'
 import { SpinningBadge } from '../components/SpinningBadge'
+import { BadgeHelix } from '../components/BadgeHelix'
 import {
   boilOffset,
   capability,
@@ -127,6 +133,134 @@ export function WritersGarden() {
   // Read once per render rather than per element: twelve tiles asking the same
   // getter twelve times is twelve reads of a value that cannot change mid-paint.
   const heavyFilters = tier >= 2 && capability.useHeavyFilters
+
+  /* ---- Layout ----
+   *
+   * The rail runs sideways or the badges wind up a helix, and the two share
+   * everything except how they are laid out: the same twelve badges, the same
+   * `active`, the same caption, the same requirements panel. Which means the
+   * toggle only has to swap the middle of the page — nothing below it knows
+   * which mode it is in.
+   *
+   * The helix needs WebGL and it needs motion, so under reduced motion it falls
+   * back to a plain vertical column. That is not a degraded helix, it is a
+   * different, quieter layout — a helix that does not turn is just a list of
+   * badges at odd angles.
+   */
+  const [layout, setLayout] = useState<LayoutMode>('horizontal')
+  const vertical = layout === 'vertical'
+  const helix = vertical && !reducedMotion
+
+  /**
+   * The continuous badge index the vertical scroller is at.
+   *
+   * A ref, not state. It changes on every scroll event — pointer rate, not
+   * render rate — and the only thing that reads it is a WebGL frame loop that
+   * is already running. Putting it in state would re-render the page, the
+   * caption and the panel sixty times a second to deliver a number React never
+   * looks at.
+   */
+  const helixTarget = useRef(0)
+  const columnRef = useRef<HTMLDivElement>(null)
+  const slotRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  const setSlotRef = useCallback(
+    (i: number) => (node: HTMLButtonElement | null) => {
+      slotRefs.current[i] = node
+    },
+    [],
+  )
+
+  /**
+   * Drive the helix from the vertical scroller.
+   *
+   * Same division of labour as the horizontal rail: the browser owns the scroll
+   * position — with real snapping, a real scrollbar, touch flings and keyboard —
+   * and this only converts it into the one number the renderer wants. The
+   * weight, the lag and the overshoot are the spring's job, downstream of here.
+   *
+   * With the helix running, `active` is deliberately *not* set from here: the
+   * renderer reports whichever badge is nearest the front, and that is the
+   * *damped* index rather than the raw scroll one — so the caption changes when
+   * the badge has actually arrived at the front, not the moment the scroll
+   * crosses the halfway mark. Without the helix there is no damped index and
+   * nothing downstream to report it, so this reads it off the scroll directly.
+   */
+  useEffect(() => {
+    const column = columnRef.current
+    if (!column || !vertical) return
+
+    const read = () => {
+      const index = column.scrollTop / VERTICAL_PITCH
+      helixTarget.current = index
+      if (!helix) {
+        setActive(Math.min(BADGES.length - 1, Math.max(0, Math.round(index))))
+      }
+    }
+    read()
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+      if (!step) return
+      event.preventDefault()
+      const focused = slotRefs.current.indexOf(document.activeElement as HTMLButtonElement)
+      if (focused >= 0) {
+        slotRefs.current[Math.min(BADGES.length - 1, Math.max(0, focused + step))]?.focus()
+        return
+      }
+      const next = Math.round(column.scrollTop / VERTICAL_PITCH) + step
+      column.scrollTo({
+        top: Math.min(BADGES.length - 1, Math.max(0, next)) * VERTICAL_PITCH,
+        behavior: 'smooth',
+      })
+    }
+
+    // Tabbing to a badge brings it to the front, on the same `:focus-visible`
+    // guard the horizontal rail uses and for the same reason — a pointer press
+    // focuses the button before anything has moved.
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target?.matches?.(':focus-visible')) return
+      const i = slotRefs.current.indexOf(target as HTMLButtonElement)
+      if (i < 0) return
+      column.scrollTo({ top: i * VERTICAL_PITCH, behavior: 'smooth' })
+    }
+
+    column.addEventListener('scroll', read, { passive: true })
+    column.addEventListener('keydown', onKeyDown)
+    column.addEventListener('focusin', onFocusIn)
+    return () => {
+      column.removeEventListener('scroll', read)
+      column.removeEventListener('keydown', onKeyDown)
+      column.removeEventListener('focusin', onFocusIn)
+    }
+  }, [vertical, helix])
+
+  /**
+   * Carry the focused badge across a layout change.
+   *
+   * Switching modes rebuilds the middle of the page, and the new rail starts at
+   * whatever scroll offset a fresh element has, which is zero. Without this,
+   * every toggle would silently throw you back to Tulip. `scrollTo` with
+   * `behavior: 'auto'` because this happens on the frame the layout appears —
+   * there is nothing to animate from.
+   */
+  useLayoutEffect(() => {
+    if (vertical) {
+      const column = columnRef.current
+      if (!column) return
+      column.scrollTop = active * VERTICAL_PITCH
+      helixTarget.current = active
+      return
+    }
+    const scroller = scrollerRef.current
+    const tile = tileRefs.current[active]
+    if (!scroller || !tile) return
+    scroller.scrollLeft = tile.offsetLeft + TILE_W / 2 - scroller.clientWidth / 2
+    // `active` is intentionally absent: this runs when the *layout* changes, and
+    // re-running it on every badge change would fight the rail's own scrolling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vertical])
 
   /* ---- The requirements panel — node 318:22783 ----
    *
@@ -595,7 +729,10 @@ export function WritersGarden() {
       scroller.removeEventListener('pointercancel', onPointerUp)
       scroller.removeEventListener('focusin', onFocusIn)
     }
-  }, [])
+    // Rebuilt across a layout change. The horizontal rail unmounts in vertical
+    // mode, so without this the listeners would stay bound to a detached
+    // element and the *new* scroller — a different node — would come back dead.
+  }, [vertical])
 
 
   /**
@@ -831,7 +968,8 @@ export function WritersGarden() {
     // inline styles it wrote, so the buttons go back to untransformed rather
     // than keeping whatever rotation they were mid-tween on.
     return () => ctx.revert()
-  }, [])
+    // Same as the loop above: the tiles it binds to are gone in vertical mode.
+  }, [vertical])
 
   /** Scroll tile `i` to the centre.
    *
@@ -855,17 +993,33 @@ export function WritersGarden() {
 
   return (
     <div className="font-lausanne flex min-h-svh w-full flex-col items-center overflow-hidden bg-white pt-9 pb-[38px]">
-      {/* Node 317:17934 — the title pill. */}
-      <div className="flex shrink-0 items-center justify-center gap-3 rounded-xl bg-black py-3 pr-5 pl-3">
-        <img src={iconDotGrid} alt="" className="size-10 shrink-0" />
-        <p className="text-[40px] leading-[1.0008] font-semibold tracking-[-0.8px] whitespace-nowrap text-white">
-          {COPY.title}
-        </p>
+      {/* Node 317:17934 — the title pill, with the layout toggle beside it.
+          The toggle is not in the design; it is set in the pill's own language
+          — same black, same radius — so it reads as part of the header rather
+          than as a control bolted onto the page. */}
+      <div className="flex shrink-0 items-center gap-3">
+        <div className="flex items-center justify-center gap-3 rounded-xl bg-black py-3 pr-5 pl-3">
+          <img src={iconDotGrid} alt="" className="size-10 shrink-0" />
+          <p className="text-[40px] leading-[1.0008] font-semibold tracking-[-0.8px] whitespace-nowrap text-white">
+            {COPY.title}
+          </p>
+        </div>
+        <LayoutToggle value={layout} onChange={setLayout} />
       </div>
 
       {/* Node 318:21420 — the rail. `min-h-0` so the row absorbs the leftover
           height instead of forcing the page taller than the viewport. */}
       <div className="flex min-h-0 w-full flex-1 items-center">
+        {vertical ? (
+          <VerticalRail
+            columnRef={columnRef}
+            setSlotRef={setSlotRef}
+            active={active}
+            helix={helix}
+            targetRef={helixTarget}
+            onFront={setActive}
+          />
+        ) : (
         <div
           ref={scrollerRef}
           tabIndex={0}
@@ -999,7 +1153,8 @@ export function WritersGarden() {
               </div>
             </button>
           ))}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Node 312:3165 — the caption, which is the rail's readout. */}
@@ -1039,13 +1194,51 @@ export function WritersGarden() {
               onClick={() => setPanelOpen((open) => !open)}
               aria-expanded={panelOpen}
               aria-controls={PANEL_ID}
-              className="relative flex shrink-0 cursor-pointer items-center justify-center gap-1 bg-transparent p-0"
+              className="group relative flex shrink-0 cursor-pointer items-center justify-center gap-1 bg-transparent p-0"
             >
-              <p className="text-[20px] leading-[1.0008] font-semibold tracking-[-0.4px] whitespace-nowrap text-black">
+              {/* Both sit above the fill: the fill is later in the DOM, so
+                  without a stacking context of their own it would paint over
+                  the very text it is meant to sit behind. */}
+              <p className="relative z-[1] text-[20px] leading-[1.0008] font-semibold tracking-[-0.4px] whitespace-nowrap text-black transition-colors duration-300 ease-out group-hover:text-white group-focus-visible:text-white motion-reduce:transition-none">
                 {COPY.requirements}
               </p>
-              <img src={iconArrowUpRight} alt="" className="size-6 shrink-0" />
-              <span className="absolute -bottom-[3px] left-0 h-0.5 w-full bg-black" />
+              {/* The arrow is an `<img>` of an SVG with a hard-coded
+                  `fill="black"`, so `currentColor` cannot reach it and the
+                  text's own colour transition does nothing here. Inverting
+                  the whole image is the one lever left, and on a glyph that
+                  is pure black on transparent it lands on exactly white. */}
+              <img
+                src={iconArrowUpRight}
+                alt=""
+                className="relative z-[1] size-5 shrink-0 transition-[filter] duration-300 ease-out group-hover:invert group-focus-visible:invert motion-reduce:transition-none"
+              />
+              {/* The underline and the hover fill are the same element.
+
+                  It is laid out at its *full* height — the button's 20.02px
+                  plus 4px below and 4px above — and then scaled down on the Y
+                  axis to roughly 2/28 of that, which is the 2px rule as drawn.
+                  So one property carries the whole hover.
+
+                  The 4px above is the balance the design asks for: the rule
+                  already sits 4px below the button, so the block has to clear
+                  the top by the same 4px or the text ends up sitting low in
+                  its own fill. `calc(100% + 8px)` is those two edges.
+
+                  The scale is a rounded constant rather than an exact ratio,
+                  which costs nothing: it is only ever wrong about the *resting*
+                  rule, by four ten-thousandths of a pixel, and the expanded
+                  state is `scaleY(1)` and therefore exact by construction.
+
+                  `origin-bottom` is what makes it grow only upward: the bottom
+                  edge is the fixed point, so the rule lifts into a block
+                  instead of inflating from its middle. And scaling rather than
+                  animating `height` keeps it on the compositor — a solid fill
+                  has no detail to lose to a 14x stretch. */}
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-0 -bottom-[4px] origin-bottom scale-y-[0.0714] bg-black transition-transform duration-300 ease-out group-hover:scale-y-100 group-focus-visible:scale-y-100 motion-reduce:transition-none"
+                style={{ height: 'calc(100% + 8px)' }}
+              />
             </button>
           </div>
 
@@ -1082,6 +1275,210 @@ export function WritersGarden() {
           />
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+/**
+ * Rail or helix.
+ *
+ * A radiogroup rather than two toggle buttons, because the options are
+ * mutually exclusive and that is the difference the roles carry: `aria-pressed`
+ * on a pair of buttons says "two independent switches, both currently off but
+ * one", where a radiogroup says "one setting, two values". Roving tabindex to
+ * match — a radiogroup is one tab stop, and the arrows move within it.
+ */
+function LayoutToggle({
+  value,
+  onChange,
+}: {
+  value: LayoutMode
+  onChange: (next: LayoutMode) => void
+}) {
+  const modes = Object.keys(LAYOUTS) as LayoutMode[]
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+
+  const move = (from: number, step: number) => {
+    // Wrapping, which is what a radiogroup does — arrowing off the end of a
+    // two-option group and stopping there is indistinguishable from a dead key.
+    const next = (from + step + modes.length) % modes.length
+    onChange(modes[next])
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Badge layout"
+      className="flex shrink-0 items-center gap-1 rounded-xl bg-black p-1"
+    >
+      {modes.map((mode, i) => {
+        const selected = mode === value
+        return (
+          <button
+            key={mode}
+            ref={(node) => {
+              refs.current[i] = node
+            }}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            // One tab stop for the group: only the selected option is
+            // reachable by Tab, and the arrows do the rest.
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(mode)}
+            onKeyDown={(event) => {
+              const step =
+                event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                  ? 1
+                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                    ? -1
+                    : 0
+              if (!step) return
+              event.preventDefault()
+              move(i, step)
+            }}
+            className={`cursor-pointer rounded-lg px-4 py-2 text-[20px] leading-[1.0008] font-semibold tracking-[-0.4px] whitespace-nowrap transition-colors duration-200 ${
+              selected ? 'bg-white text-black' : 'bg-transparent text-white/55 hover:text-white'
+            }`}
+          >
+            {LAYOUTS[mode]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * The vertical layout: a scroller of transparent snap targets over a helix.
+ *
+ * The split is the point. Every visible thing is in the canvas, and every
+ * *interactive* thing is a real focusable button in a real scroll container
+ * above it — so the helix costs nothing in accessibility terms. A screen reader
+ * gets a listbox of twelve named options, the keyboard gets arrows and Tab, and
+ * touch gets the platform's own fling and snap. The canvas is `aria-hidden`
+ * scenery drawn from the position that scroller reports. (The scrollbar itself
+ * is hidden, matching the horizontal rail — `scroll-hidden` — so the snap
+ * targets and the keyboard are carrying the whole affordance.)
+ *
+ * That is the same bargain the horizontal rail strikes — the browser owns the
+ * scroll position, the renderer owns everything downstream of it — and it is
+ * why neither layout needed a scroll-hijacking library to feel like anything.
+ */
+/**
+ * How far the design's 498×517 card is scaled down for the flat vertical
+ * column — the no-WebGL and reduced-motion path.
+ *
+ * 0.44 puts the card at 228px in a 260px pitch, so it keeps about 30px of air
+ * between one card and the next. One factor for the whole card, so the corner
+ * radius and the badge's offsets inside it stay the design's numbers rather
+ * than becoming a second set to keep in step.
+ */
+const FALLBACK_CARD = 0.44
+
+function VerticalRail({
+  columnRef,
+  setSlotRef,
+  active,
+  helix,
+  targetRef,
+  onFront,
+}: {
+  columnRef: RefObject<HTMLDivElement | null>
+  setSlotRef: (i: number) => (node: HTMLButtonElement | null) => void
+  active: number
+  helix: boolean
+  targetRef: { current: number }
+  onFront: (index: number) => void
+}) {
+  return (
+    // `self-stretch` because the row that holds this centres its children, and
+    // the scroller needs the row's full height for its percentage-height
+    // lead-in and lead-out to resolve against something real.
+    <div className="relative min-h-0 w-full self-stretch">
+      {helix && (
+        <BadgeHelix
+          badges={BADGES}
+          targetRef={targetRef}
+          onFront={onFront}
+          fog={PAGE}
+          className="pointer-events-none absolute inset-0"
+        />
+      )}
+
+      <div
+        ref={columnRef}
+        tabIndex={0}
+        role="listbox"
+        aria-label="Badges"
+        aria-orientation="vertical"
+        className="scroll-hidden absolute inset-0 snap-y snap-mandatory overflow-y-auto outline-none"
+      >
+        {/* Half a viewport of lead-in and lead-out, so the first and last badge
+            can reach the centre. A percentage *height* — unlike the horizontal
+            rail's percentage padding, which resolves against width and would be
+            meaningless here — and it resolves because the scroller is
+            `absolute inset-0` and so has a definite height of its own. */}
+        <div
+          aria-hidden
+          className="shrink-0"
+          style={{ height: `calc(50% - ${VERTICAL_PITCH / 2}px)` }}
+        />
+        {BADGES.map((item, i) => (
+          <button
+            key={item.name}
+            ref={setSlotRef(i)}
+            type="button"
+            role="option"
+            aria-selected={i === active}
+            aria-label={`${item.name} badge`}
+            className="block w-full shrink-0 cursor-pointer snap-center bg-transparent p-0"
+            style={{ height: VERTICAL_PITCH }}
+            onClick={() =>
+              columnRef.current?.scrollTo({ top: i * VERTICAL_PITCH, behavior: 'smooth' })
+            }
+          >
+            {/* Nothing in helix mode — the canvas behind is the whole picture.
+                Without WebGL, or under reduced motion, this is the layout: the
+                same cards in a plain column, scrolling and snapping exactly the
+                same way, minus the winding. The card is the design's 498×517
+                scaled down to sit in the pitch with air around it, so every
+                offset inside it is the design's own number times one factor. */}
+            {!helix && (
+              <div
+                className="relative mx-auto overflow-clip"
+                style={{
+                  width: FOCUS_W * FALLBACK_CARD,
+                  height: FOCUS_H * FALLBACK_CARD,
+                  background: PLATE,
+                  borderRadius: TILE_RADIUS * FALLBACK_CARD,
+                }}
+              >
+                <img
+                  src={item.art}
+                  alt=""
+                  draggable={false}
+                  loading={i < 3 ? 'eager' : 'lazy'}
+                  decoding="async"
+                  className="pointer-events-none absolute max-w-none"
+                  style={{
+                    width: BADGE_IMG * FALLBACK_CARD,
+                    height: BADGE_IMG * FALLBACK_CARD,
+                    left: BADGE_IMG_X * FALLBACK_CARD,
+                    top: BADGE_IMG_Y * FALLBACK_CARD,
+                  }}
+                />
+              </div>
+            )}
+          </button>
+        ))}
+        <div
+          aria-hidden
+          className="shrink-0"
+          style={{ height: `calc(50% - ${VERTICAL_PITCH / 2}px)` }}
+        />
+      </div>
     </div>
   )
 }

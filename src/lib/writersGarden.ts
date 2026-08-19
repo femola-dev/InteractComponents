@@ -361,6 +361,217 @@ export const SPIN_RAMP = 0.9
  */
 export const PANEL_BADGE_BACK = '#c2a35c'
 
+/* ---- The helix ----
+ *
+ * The vertical layout winds the twelve badges up a double helix built to
+ * B-DNA's own numbers. Working units below are *badge half-heights*: the badge
+ * is 2 units tall and 2 wide, which is the same convention `SpinningBadge`
+ * uses, so both renderers agree on what "1" means.
+ *
+ * B-DNA, measured (Watson–Crick / Drew–Dickerson, the canonical fibre and
+ * crystal values):
+ *
+ *   helical twist   34.3° per base pair   → 10.5 base pairs per turn
+ *   rise             3.32 Å per base pair
+ *   radius          10 Å                  → the familiar 20 Å diameter
+ *   strand offset  ~120°                  → the major and minor grooves
+ *
+ * Two of those four are used literally and two are scaled, and it is worth
+ * being exact about which. The twist and the strand offset are the *angular*
+ * facts about DNA — they are what the shape looks like — and they are used
+ * untouched. The rise is scaled, because it has to be: see `HELIX_RISE`.
+ */
+
+/** B-DNA's helical twist per base pair, in radians. One badge is one base. */
+export const HELIX_TWIST = (34.3 * Math.PI) / 180
+
+/**
+ * The angle between the two backbones, in radians.
+ *
+ * 120°, and emphatically not 180°. Two strands placed exactly opposite would
+ * give a helix with two identical grooves; B-DNA's are famously *unequal* — a
+ * wide major groove of about 22 Å and a narrow minor one of about 12 Å — and
+ * that asymmetry is a direct consequence of the glycosidic bonds sitting off to
+ * one side of the base pair rather than across its diameter. It is also the
+ * single detail that makes a drawing read as DNA instead of as two generic
+ * intertwined spirals, so it is the last thing that should be rounded off.
+ */
+export const HELIX_STRAND_OFFSET = (120 * Math.PI) / 180
+
+/** Distance from the axis to a backbone, in badge half-heights. */
+export const HELIX_RADIUS = 2.4
+
+/** B-DNA's own rise-to-radius ratio, 3.32 Å / 10 Å. */
+export const DNA_RISE_RATIO = 3.32 / 10
+
+/**
+ * How much the rise is stretched past the molecule's, and why it has to be.
+ *
+ * At B-DNA's true proportions a base pair is 3.32 Å thick on a 20 Å diameter —
+ * the plates are stacked about six times closer than they are wide, which is
+ * exactly why the molecule looks solid rather than like a spiral staircase. Ask
+ * twelve badges to stack that way and they overlap by around 60%: a beautiful
+ * dense coil in which not one badge is legible.
+ *
+ * So this is the one place the molecule is overruled by the fact that the
+ * things on it have to be read. 2.9 puts the rise at 2.31 units against a badge
+ * 2 tall, so consecutive badges clear each other with a little air. Everything
+ * angular stays real; only the spacing along the axis is stretched, which is
+ * the parameter a reader is least able to check by eye and the one the layout
+ * most depends on.
+ */
+export const HELIX_RISE_STRETCH = 2.9
+export const HELIX_RISE = HELIX_RADIUS * DNA_RISE_RATIO * HELIX_RISE_STRETCH
+
+/**
+ * Camera distance and vertical field of view.
+ *
+ * These two settle a straight conflict, and it is worth naming it rather than
+ * pretending the numbers were free. How big the focused badge is goes as
+ * `1 / ((D − R) · tan(fov/2))`; how much of the helix is in frame goes as
+ * `D · tan(fov/2)`. Both are governed by the same tangent, in opposite
+ * directions — a lens tight enough to make the front badge as large as the
+ * horizontal rail's 358px leaves 0.96 pitches in frame, which is one badge and
+ * two slivers, and at that point the helix has no shape to see.
+ *
+ * So the badge gives way, because the structure is the reason this layout
+ * exists. At D = 9 and a 40° vertical field the frame holds ±1.42 pitches —
+ * the focused badge with a neighbour above and below — and the focused badge
+ * lands around 300px in the ~730px the rail area gets on a 1024-tall window.
+ * Smaller than the horizontal rail's, and it should be: there, one tile is the
+ * whole subject.
+ *
+ * Pulling the camera in to 9 rather than holding it back also widens the
+ * near-to-far size ratio across the helix from 1.56 to 1.73, which is free
+ * depth — the far badges read as further away rather than merely smaller.
+ */
+export const HELIX_CAMERA_DISTANCE = 9
+export const HELIX_FOV = (40 * Math.PI) / 180
+
+/** Where on the circle a badge faces the camera. The camera sits on +Z, and a
+ *  badge's face normal is its own radial direction, so it looks straight down
+ *  the lens at a quarter turn. */
+export const HELIX_FRONT_PHASE = Math.PI / 2
+
+/**
+ * Distance at which the far side of the helix has faded fully into the page.
+ *
+ * The page is white, so depth is cued by *losing contrast* rather than by going
+ * dark — the far strand and the badges on it wash out toward the background the
+ * way anything does through a depth of air. The near bound is the closest a
+ * badge ever gets (`HELIX_CAMERA_DISTANCE − HELIX_RADIUS`), so the focused one
+ * is never touched by it.
+ */
+export const HELIX_FOG_NEAR = HELIX_CAMERA_DISTANCE - HELIX_RADIUS
+export const HELIX_FOG_FAR = HELIX_CAMERA_DISTANCE + HELIX_RADIUS * 4.4
+
+/**
+ * The backbone and the base-pair rungs: colour, half-width and opacity.
+ *
+ * The colour is a desaturated version of the gold every badge is rimmed with,
+ * so the structure belongs to the things hanging off it.
+ *
+ * The width is a *half*-width in world units, and world units here are badge
+ * half-heights — so it needs converting before it means anything. The focused
+ * badge is around 300px tall on a 1024-tall window, which puts one unit at
+ * ~150px, which makes this ribbon 2 × 0.022 × 150 ≈ 6.6px at the front of the
+ * helix and thinner as it recedes. That is a drawn line; at the 0.055 it
+ * started from it was a 16px band competing with the badges.
+ */
+export const HELIX_STRAND_COLOR = '#b9ad8e'
+export const HELIX_STRAND_WIDTH = 0.022
+export const HELIX_STRAND_ALPHA = 0.55
+export const HELIX_RUNG_ALPHA = 0.3
+
+/* ---- The card, on the helix ----
+ *
+ * The helix carries the whole plate, not a bare badge: the same #fafafa card at
+ * the same 498×517 with the same 28px corners, the ghost name rising behind it,
+ * the shimmer sweeping across it, the pointer glow, and the focus scale. All of
+ * which used to be CSS on a DOM tile and now has to be a shader, because the
+ * tile is a textured quad in a 3D scene.
+ *
+ * World units stay what they were — the card is 2 units tall, so `HELIX_RISE`
+ * and `HELIX_RADIUS` carry over untouched. It is only the *aspect* that changes,
+ * because a card is not square where a badge was.
+ */
+
+/** Card half-width, with half-height fixed at 1. */
+export const HELIX_CARD_ASPECT = FOCUS_W / FOCUS_H
+
+/**
+ * The pointer tilt, in radians, and the lift.
+ *
+ * The rail's own 4° and 6°, kept rather than re-tuned: the helix should feel
+ * like the same object under the cursor as the rail does. The lift converts
+ * from the rail's 6px — on a card 517 design-pixels tall that is 6/517 of a
+ * half-card, and a half-card is 1 world unit.
+ */
+export const HELIX_TILT_X = (4 * Math.PI) / 180
+export const HELIX_TILT_Y = (6 * Math.PI) / 180
+export const HELIX_LIFT = (6 / FOCUS_H) * 2
+
+/**
+ * The ghost name's texture, and why it is taller than the card.
+ *
+ * The word does not fade in, it rises — `GHOST_REST_Y` below its focused
+ * position when the card is cold, sliding up as the card takes focus. Baking it
+ * at one position and sliding the *sampling window* is what reproduces that, and
+ * that window has to have somewhere to slide from: the texture spans the card
+ * plus the full travel, with the word painted `GHOST_REST_Y` down from the top,
+ * so a cold card samples the empty band above it and a focused one samples the
+ * word.
+ *
+ * Baked at a fraction of card resolution because it is blurred by
+ * `GHOST_BLUR` before anything ever sees it — a 10px gaussian on a 200px glyph
+ * destroys far more detail than halving the raster does, so the extra texels
+ * would be spent rendering something that is then thrown away.
+ */
+export const GHOST_TEX_SPAN = FOCUS_H + GHOST_REST_Y
+export const GHOST_TEX_SCALE = 0.5
+
+/* ---- The vertical rail ---- */
+
+/**
+ * Scroll distance per badge, in CSS pixels.
+ *
+ * Shorter than the horizontal rail's 481px pitch on purpose: a wheel notch is
+ * ~100px and vertical is the axis it was built for, so the same pitch that
+ * feels deliberate sideways feels like wading downward.
+ */
+export const VERTICAL_PITCH = 260
+
+/**
+ * The spring that carries the helix from one badge to the next.
+ *
+ * Not an easing curve — a damped harmonic oscillator, solved exactly, in
+ * `src/lib/spring.ts`. What it acts on is the *continuous badge index*: the
+ * scroller writes where the scroll actually is, this trails it with mass, and
+ * the phase and camera height are both derived from the result. One scalar of
+ * state, so the rotation and the rise can never disagree about where the helix
+ * is.
+ *
+ * ω = 2π × 1.2 rad/s and ζ = 0.62 give, by the formulas in that file:
+ *
+ *   overshoot     exp(−πζ/√(1−ζ²))  =  8.4% of the step
+ *   settling time 4 / ζω            =  0.86 s
+ *
+ * The overshoot is the part worth having. A flick of three badges over-rotates
+ * by 0.084 × 3 × 34.3° ≈ 8.6° and winds back — the helix carries momentum past
+ * the mark and unwinds into place, which is what a heavy thing on a spring
+ * does. Pushed under about ζ = 0.5 it visibly bounces twice and starts to read
+ * as a loose mechanism rather than a weighted one.
+ */
+export const HELIX_OMEGA = 2 * Math.PI * 1.2
+export const HELIX_ZETA = 0.62
+
+export const LAYOUTS = {
+  horizontal: 'Rail',
+  vertical: 'Helix',
+} as const
+
+export type LayoutMode = keyof typeof LAYOUTS
+
 /* ---- Content ---- */
 
 export type Requirement = {
