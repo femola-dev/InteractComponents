@@ -505,51 +505,59 @@ blocks:
 `ArticleBody` walks that list and renders the right element for each `kind`.
 Change the content file and the article changes — no layout code touched.
 
-### The read-along highlight
+**`ListenButton`** — the narration control, and it has **three** states rather
+than two: `idle` → `playing` → `paused`. The distinction earns its keep. `idle`
+is where the page loads, with nothing read yet and so no place to hold; once
+narration has started the button only ever moves between playing and paused, and
+a pause keeps its place in the text.
 
-- `ListenButton` toggles narration. **There is no audio** — the highlight *is*
-  the feature, standing in for a reader's eye moving through the text.
-- `useReadingCursor` advances a word index at **150 words per minute**.
-  Deliberately below a natural reading pace (~210): the mark is meant to be
-  followed, and at speed it stops being trackable and just flickers. 150 gives
-  each word 400ms.
-- Narration has three states: `idle` (nothing read yet, no place to hold),
-  `playing`, `paused`. Once started it only moves between the last two, and a
-  pause keeps its place.
-- `reading.ts` holds **one tokenizer shared between counting and rendering**. The
-  highlight indexes words by position, so if the two ever disagreed the cursor
-  would drift out of step with the text. The tokenizer splits on whitespace but
-  *keeps* it, so `whitespace-pre-line` still sees paragraph newlines.
-- The pane follows the mark, but **only once it leaves a comfortable middle band**
-  (25%–70% of the frame) — scrolling on every word would yank the page out from
-  under the reader.
-- `view` is a dependency of that effect, so returning from the summary brings the
-  parked mark back into sight.
-- Switching to the summary **pauses** narration rather than stopping it: the
-  summary isn't what it was reading, and the article is still mid-sentence on
-  return.
+The icon and the label are animated by two different mechanisms, for two
+different reasons:
 
-### `ListenButton`
+- **The icon** shows the *action*, not the state — pause while it runs, play
+  both before it starts and while it's held. Both icons live in the same grid
+  cell, and one fades and rotates out as the other fades in.
+- **The label** is a single vertical strip of all three words (`Listen`,
+  `Playing`, `Paused`) clipped to one 16px line box, slid by
+  `y: -index × 16`. A strip rather than a swap means it always travels the short
+  way between two neighbouring words, with no bookkeeping about which state came
+  before — and because the words are stacked, the button keeps the width of its
+  widest one and never resizes under the pointer mid-toggle.
 
-- Both icons and both labels are always in the DOM, stacked in the same grid
-  cell; one fades and rotates out as the other fades in. That is why the button
-  doesn't twitch or resize when pressed.
+*It still doesn't play real audio — the "narration" is a highlight moving
+through the text, not a voice.*
 
-### `AskAiFab`
+**`useReadingCursor` + `reading.ts`** — what that highlight actually is.
+`reading.ts` tokenises the article into words; `useReadingCursor` advances an
+index through them on an interval at **150 words per minute**, which is a slow
+speaking pace rather than a reading one — roughly 400ms a word, which the eye
+can comfortably ride.
 
-- Round gradient button. Its background is a four-colour gradient drifting on a
-  9-second loop; it shows a tooltip on hover; clicking triggers the sweep.
+The three states are the reason this hook is more than a `setInterval`:
 
-### `ProgressiveBlur`
+| State | Cursor | Behaviour |
+|---|---|---|
+| `idle` | `null` | Nothing has been read; no mark is drawn |
+| `playing` | advancing | The interval runs |
+| `paused` | frozen, still visible | The mark parks where the reader left it |
 
-More interesting than it looks:
+**A pause is a bookmark, not a stop.** The index survives it, so resuming picks
+the sentence back up — and `paused` still *reports* a word, so the mark stays on
+screen rather than vanishing while you're stopped. Only `idle` rewinds to zero,
+and the only route back to `idle` is a reload, which takes the whole page state
+with it anyway.
 
-- A single `backdrop-blur` gives a hard edge where the blur starts.
-- This stacks **ten** thin blur layers with gradient masks, each calculated so the
-  *cumulative* blur ramps smoothly from 0 to ~4.9px, matching the curve Figma
-  specified.
-- Stacked blurs compound **in quadrature**, not linearly — which is why the maths
-  in that file looks the way it does.
+**`AskAiFab`** — the round gradient button. Its background is a four-colour
+gradient slowly drifting on a 9-second loop, it shows a tooltip on hover, and
+clicking it triggers the sweep transition to the AI summary view.
+
+**`ProgressiveBlur`** — the fade at the bottom of the reading pane. This is more
+interesting than it looks. A single `backdrop-blur` gives a hard edge where the
+blur starts. This component instead stacks **ten** thin blur layers with
+gradient masks, each one calculated so the *cumulative* blur ramps smoothly from
+0 to ~4.9px — matching the exact curve Figma specified. (Stacked blurs compound
+in quadrature, not linearly, which is why the maths in that file looks like it
+does.)
 
 ### What happens when you click "Ask AI"
 
@@ -696,7 +704,8 @@ MEMBERS → filter (tier, company) → sort (key, direction) → slice (page) �
 
 ---
 
-## 10. Page 4 — Movie Choice (Move)
+Source: [`src/playgrounds/Move.tsx`](src/playgrounds/Move.tsx) — at ~2,180 lines,
+the largest screen in the project.
 
 Source: `src/playgrounds/Move.tsx` (~2,180 lines — the largest screen). A film
 picker in portrait, inside `MobileFrame`.
@@ -756,76 +765,101 @@ than guessed**:
   moving, and the steps compound into one accelerating spin instead of a queue of
   identical hops.
 
-### Shuffle: hiding a cut with a focus pull
+### Shuffle, part 1: a throw made of physics rather than a timetable
 
-The interesting problem: Shuffle can land on a film from a genre the wheel was
-never spinning through, so the deck has to change in a single frame. A visible
-swap would read as a glitch.
+Shuffle spins the wheel across the library for four seconds and lands on a film
+it picked at the press. How that four seconds is *shaped* was rebuilt, and the
+rebuild is the most interesting thing on the screen.
+
+**What it used to be:** one timing table — fourteen keyframe times on a
+geometric ritardando (each gap 1.14× the last), with the audio reading the same
+array so the clicks couldn't drift from the cards.
+
+**What it is now:** two acts, and only the first is authored.
+
+| Act | Length | What drives it |
+|---|---|---|
+| **Cruise** | `SPIN_THROW` = 2.9s | Flat, constant speed — one card every `SPIN_TEMPO` = **85ms** |
+| **Settle** | `SPIN_SETTLE` = 1.1s | `springThrow`, released into the final detent with the cruise's velocity still in it |
+
+The insight is that a wheel's *throw* is a decision — how fast, how long — but
+its *ending* is not. That's just what a mass with drag does when you stop
+pushing it, and every number in a hand-built ritardando is a guess at a curve
+physics already knows. So the cruise is the only thing written down, and the end
+is a spring let go.
+
+**`springThrow` is solved, not tuned by eye.** To shed a velocity `v` over a
+distance `d` without sailing past the target, a second-order system wants
+`ωn ≈ v/d`. The cruise runs 34 cards / 2.9s × 14° = **164°/s**, the coast is
+three cards of 14° = **42°**, so `ωn ≈ 3.9 rad/s` — giving `stiffness = ωn²`
+≈ 15.3 and `damping = 2ζωn` ≈ 7.35, which puts ζ at 0.94. Just *under* critical,
+deliberately: overdamping reads as the wheel being **held** rather than running
+out, and it's also slower, since the dominant pole of an overdamped pair drifts
+toward zero.
+
+Three things the old table had to fake now fall out for free:
+
+- **The wheel eases in.** `springWheel` needs ~0.3s to reach cruise from rest,
+  so the reel spins up instead of starting at full speed.
+- **The ritardando is real.** A second-order settle, not 1.14 per step.
+- **The sound follows** — which is the next section.
+
+**Why three coasting cards and not five.** `SPIN_COAST_DETENTS` trades directly
+against how cleanly the card arrives, via one relation:
+`coast ≈ rate × ζ × arrival-time / 5.9`. At 11.7 cards/s and a 1.1s tail that's
+three. Five was tried and it's where this went wrong: a spring soft enough to
+coast five cards is still 300px from its seat when the last card crosses, then
+crawls the rest over another 800ms. The ritardando *sounded* better and the card
+never quite landed — the ending you could hear and the ending you could see were
+half a second apart.
+
+**"Arrived" needs its own threshold** (`SPIN_ARRIVED`, 1.3% of a card ≈ 8px)
+because an exponential approach never strictly gets there. Both obvious signals
+are wrong: the final detent crossing is half a pitch out with 950px/s still on
+the card, and Framer's own `onComplete` calls the spring finished with 22px to
+go and 187px/s of movement left — its rest thresholds are tuned for values at
+pixel scale, and this one is in degrees.
+
+### Shuffle, part 2: hiding a cut with a focus pull
+
+Shuffle can land on a film from a genre the wheel was never spinning through —
+so there's nothing to travel past, and the deck has to change in a single frame.
+A visible swap would read as a glitch.
 
 The fix is a **focus pull**, and the ordering is the entire trick:
 
-1. Over the **last 250ms of the spin**, while the wheel is still coasting, blur
-   rises to 22px. The picture is gone *before* anything changes.
+1. Over the **last 350ms of the cruise** (`LANDING_DEFOCUS`, delayed to end at
+   the handover), blur rises to **22px**. The picture is gone *before* anything
+   changes, so the last card the reels showed is never seen to be the wrong one.
 2. The deck swaps under cover of that blur.
-3. Focus returns over **0.7s** — a lens finding the new film, rather than a card
-   being dealt.
+3. Focus returns — and it returns on **the same spring the wheel is settling
+   under**, not on a duration of its own.
 
-- Raising the blur *before* the swap is not a refinement, it's the only order that
-  works: `useEffect` runs after paint, so a blur applied on landing arrives one
-  frame late — and that one frame of a fully sharp wrong poster is exactly the cut
-  the effect exists to hide.
-- The house lights (`0.45s`) come up *before* the picture sharpens (`0.7s`),
-  because that's the order those two things happen in a real room.
-- `SPIN_FOCUS_RATE` locks the blur to the settle **by construction**: a spring is
-  linear, so two values given the same spring and the same *normalised* initial
-  velocity trace the same curve whatever their units. Divide `SPIN_CRUISE_RATE` by
-  `SPIN_COAST_DETENTS` and the cards cancel. Retune `springThrow` and the two stay
-  in step, because neither holds a duration.
+Raising the blur *before* the swap rather than at it isn't a refinement, it's the
+only order that works: `useEffect` runs after paint, so a blur applied on landing
+would arrive one frame late — and that one frame of a fully sharp wrong poster is
+exactly the cut the effect exists to hide.
 
-### The rim light (shuffle in progress)
+**How the blur stays locked to the wheel.** The reveal runs `springThrow` with
+`velocity: SPIN_FOCUS_RATE`. A spring is linear, so two values given the same
+spring and the same *normalised* initial velocity trace the same curve whatever
+their units. The wheel enters the coast at `SPIN_CRUISE_RATE` cards per second
+with `SPIN_COAST_DETENTS` cards to go; divide one by the other and the cards
+cancel, leaving the fraction-of-the-journey per second a focus running 1 → 0 has
+to start at to arrive in step. That's what makes "the card comes into focus as it
+eases into place" a fact rather than two animations tuned until they looked
+close — retune `springThrow` and the two stay locked, because neither holds a
+duration.
 
-- The screen dims to 60% black and every genre colour burns up **three** of its
-  edges.
-- Three, not four: the device's top is above the fold, so a band across the top
-  would draw a hard lid on a frame meant to run off the screen.
-- Drawn as a **conic gradient clipped to a band**, replacing an earlier set of
-  seven inset shadows. A shadow can only put one colour at one edge by *offsetting*
-  it, so seven distinguishable colours meant seven ~50px offsets — the light
-  reached that far inward by construction, and shrinking the offsets averaged all
-  seven into grey. A conic gradient carries the whole palette around the perimeter
-  at once, so the band can be any thickness independent of how many colours are in
-  it.
-- The first hue is repeated at the end to close the loop, or the wheel has a seam
-  at twelve o'clock.
-- The mask uses `padding-box` with a transparent border, **not** `content-box`: a
-  content box is always square-cornered, so the inner edge would cut a 90° notch
-  across the 52px radius. A padding box inherits the corner minus the border width.
-- The blur (`RING_GLOW = 14` against `RING_WIDTH = 16`) is doing double duty — at
-  that ratio it also smooths the conic's seven hard colour seams. Widening the
-  blur is the cheapest easing there is.
+The house lights (`0.45s`) still come up *before* the picture sharpens, because
+that's the order those two things happen in a real room. They're triggered off a
+separate `coasting` flag set at the handover rather than off the spin ending, so
+the room brightens as the throw stops being a throw — not a second after the
+card has already resolved.
 
-### The poster treatments
-
-- **`PosterAmbience`** — the current poster, blown past the device frame
-  (`scale 1.45`) and blurred to 96px, so the light around the phone belongs to
-  whichever film is on screen. `saturate` compensates for the wash a blur that wide
-  leaves. The scale has to **outrun** the radius, not just clear it, because
-  `blur()` samples outside the element's box.
-- **`AMBIENCE_TINT`** is a deep plum (`rgba(26,14,32,0.30)`), not black. Pure black
-  over a blurred poster kills the hue along with the brightness and leaves the
-  frame grey — the one thing the ambience exists to avoid. The shipped backdrop
-  stays underneath as a floor, because posters decode asynchronously and the
-  control keys use `mix-blend-color-dodge`, which over nothing is a flash of bare
-  white on first paint.
-- **`PosterBackdrop`** — the panel is the poster, sharp at the top and ramping into
-  heavy blur beneath the copy. It uses **layer blur**, not backdrop blur: three
-  stacked copies at radii 10/26/52, each masked in from lower down. The
-  ten-`backdrop-filter` recipe in `ProgressiveBlur` reads much the same but would
-  put three backdrop roots inside a track that transforms on every slide; plain
-  `filter` on a static image composites once and sits still. Each copy is
-  overscanned 6%.
-- `rampMask` uses a **smoothstep** between stops — a straight ramp between two
-  radii shows up as a band of its own.
+A genre change is **the same reveal at a different length**: a much shorter
+defocus (`GENRE_DEFOCUS`, 160ms) and a plain curve back, since there's no wheel
+settling for it to ride.
 
 ### The rest of the screen
 
@@ -1901,7 +1935,7 @@ cubic-bezier control-point array; those arrays correspond 1:1 to the `--ease-*`
 properties in `index.css`.
 
 ```ts
-export const ease     = { smooth: [0.22,1,0.36,1], out: [...], spring: [...], inOut: [...] }
+export const ease = { smooth: [0.22, 1, 0.36, 1], out: [0.17, 1, 0.32, 1], … }
 export const duration = { fast: 0.15, normal: 0.2, slow: 0.28 }
 ```
 
@@ -1912,10 +1946,40 @@ export const duration = { fast: 0.15, normal: 0.2, slow: 0.28 }
 - **`transitionFast`** — `duration.fast` (0.15s) at `ease.smooth`. Snappy feedback for
   press and hover state changes.
 
+Easings are cubic-bezier control-point arrays (`[x1, y1, x2, y2]`) because
+that's the form Framer wants, and they correspond 1:1 to the `--ease-*` custom
+properties in `index.css`.
+
 ### The spring vocabulary
 
-Each one is tuned as a real second-order system, and the doc comments carry the
-arithmetic:
+Six springs, each tuned for a different **size and weight** of thing. The
+damping ratio ζ is the number that separates them:
+
+| Spring | ζ | For |
+|---|---|---|
+| `springResponsive` | ~0.84 | Sliders, handles, counters, things moving between containers |
+| `springMorph` | ~0.92 | A large surface changing shape — a pill growing into a tray |
+| `springPill` | ~0.71 | A small pill snapping open; overshoots ~4% and comes back once |
+| `springWheel` | ~0.81 | The Move carousel's rotation, settling into a detent |
+| `springThrow` | ~0.94 | The shuffle's four-second throw dying into its seat |
+| `springOvershoot` | ~0.56 | Badges, pops, the front card of the notification stack |
+
+Read that column and the design rule is visible: **the bigger the surface, the
+closer to critical.** Overshoot on a badge is a pop; the same overshoot on a
+tray-sized box is a wobble.
+
+Two of them are worth knowing individually:
+
+- **`springPill` vs `springMorph`.** Below ζ ≈ 0.6 the return trip becomes a
+  second visible bounce and the pill reads as rubbery; above ζ ≈ 0.85 the
+  overshoot disappears and it's just `springMorph` with extra steps.
+- **`springWheel` is a `SpringOptions`, not a `Transition`** — and the type is
+  the point. A `Transition` spring is re-solved from rest each time the target
+  changes; a `useSpring` integrates one continuous state, so **velocity survives
+  a new target**. That's why holding the next-card key makes the steps compound
+  into one accelerating spin instead of restarting as a queue of identical hops.
+  `springThrow` is a `Transition` for the mirror-image reason: the throw is a
+  discrete event with a beginning, not a value being tracked.
 
 | Spring | k / c / m | ζ | For |
 |---|---|---|---|
@@ -2147,23 +2211,24 @@ Only one screen makes any noise: **Move**. The palette lives in `src/lib/sound.t
 | Export | When |
 |---|---|
 | `DETENT` | The chevrons stepping the wheel one card |
-| `SHUFFLE` | Shuffle throwing the wheel across the library (a patch: one beep per card plus the pocket the ball drops into) |
+| `SHUFFLE` | Shuffle throwing the wheel across the library — a `beep` per card, and a `pocket` behind the last of them |
 
-Opening the tray, picking a genre, filtering a year — all silent on purpose. Sound is
-the scarcest resource in an interface: the moment it accompanies every press it stops
-marking anything, and the two events that genuinely *are the wheel turning* lose the
-one signal that set them apart.
+Opening the tray, picking a genre, filtering a year — all silent on purpose.
+Sound is the scarcest resource in an interface: the moment it accompanies every
+press it stops marking anything, and the two events that genuinely *are the wheel
+turning* lose the one signal that set them apart.
 
-**Two rules shape the palette:**
+Two rules shape the palette:
 
-1. **Nothing is a beep** — with one deliberate exception. Every hit pairs a pitched
-   layer with a filtered noise transient, and the pitched layer *falls*, because real
-   objects lose energy as they strike. A pitch that holds still is the one thing that
-   always sounds like a computer. The shuffle's pips break this knowingly: a roulette
-   table is a *counter* rather than an object, and counters beep.
-2. **Everything is quiet.** Layer gains sit between 0.04 and 0.3, under a
-   `MASTER_VOLUME` of 0.7 that turns the bus down again. These should read as texture on
-   a press you were already making, not as events of their own. The failure mode isn't
+1. **Nothing is a beep** — with one deliberate exception. Every hit pairs a
+   pitched layer with a filtered noise transient, and the pitched layer *falls*,
+   because real objects lose energy as they strike. A pitch that holds still is
+   the one thing that always sounds like a computer. The shuffle's pips break
+   this rule knowingly: a roulette table is a counter rather than an object, and
+   counters beep.
+2. **Everything is quiet.** Layer gains sit between 0.04 and 0.3, under a master
+   volume that turns the bus down again. These should read as texture on a press
+   you were already making, not as events of their own. The failure mode isn't
    "too quiet to notice" — it's "loud enough to turn off".
 
 **`DETENT` in miniature:** the pitched layer drops more than an octave in 55ms so it
@@ -2177,6 +2242,79 @@ matching the wheel's rotation.
 fall is perceptually even. `beepVolume(progress)` ramps down gently — a wheel does
 quieten as it loses energy, but ramping it hard over three coast beeps just sounds like
 a fade-out.
+
+### The shuffle's sound is fired by the wheel, not scheduled
+
+This is the part worth reading, because the first version was wrong in an
+instructive way.
+
+`SHUFFLE` used to be a **sequence** — a timetable that booked its beeps against
+the carousel's keyframe table the moment it started. From then on it was playing
+a *recording* of a spin rather than the spin in front of you, and that only works
+as long as the table describes what's on screen. It never did: the table drove
+`target`, which is the **input** to `springWheel`, and the wheel you watch is the
+spring's **output**. A spring following a ramp sits a fixed distance behind it —
+about `2ζv/ωn` — so at the top of the throw the picture ran a card and a half
+behind the sound, closing to about a third of a card by the end. Beeps, none of
+them landing on a card, with the error sliding the whole way down.
+
+So the timetable is gone and **the wheel triggers its own sound**. The carousel
+already watches the rendered angle to decide which cards to mount; it now beeps
+off that same signal, one hit per detent the rim actually crosses:
+
+```ts
+useMotionValueEvent(wheel, 'change', (degrees) => {
+  const detent = Math.round(degrees / WHEEL_STEP_DEG)
+  if (detent === rimRef.current) return          // no crossing, no beep
+  …
+  const progress = (detent - spin.from - 1) / (spin.rest - spin.from - 1)
+  shuffleKit.play('beep', { detune: beepDetune(progress), volume: beepVolume(progress) })
+})
+```
+
+The thing making the sound is now the thing you're looking at. Three
+consequences:
+
+- **The rhythm is free.** The beeps accelerate as the reel spins up (103ms, 87,
+  85), hold at 85 through the cruise, then run down through 86, 95, 125, 240 as
+  the spring dies. *Not one of those numbers is written anywhere.* They're what
+  the wheel did.
+- **`progress` is read off seats, not off a count of events** — so a dropped
+  frame costs one beep instead of shifting every pitch after it.
+- **A `SoundPatch`, not a `SoundDefinition`.** `useSound` bakes its options in at
+  hook time and returns a play function taking no arguments, so it can't carry a
+  pitch that changes per hit. `usePatch` gives you `play(name, opts)` — while
+  still routing through the provider's volume and mute, which a bare
+  `defineSound` would bypass.
+
+**The pitch falls with the tempo.** `beepDetune` walks one definition from
+1300Hz down to 820Hz across the throw, expressed in **cents** rather than as a
+table of frequencies — the ear hears ratios, so even musical steps *are* a linear
+ramp in cents, and a straight drop in Hz would crawl at the top and plummet at
+the bottom. Pitch and tempo carrying the same message is the point: the wheel
+losing energy shows up twice, and two channels saying "slowing down" is what
+makes the last beep land as an ending rather than a pause. `beepVolume` fades to
+0.75 alongside it — gently, because ramping hard makes the spin sound like it's
+receding into the distance rather than settling in front of you.
+
+**The pocket waits for the picture, not for a card.** It fires on arrival —
+`SPIN_ARRIVED`, about eight pixels from the seat — which is **+523ms** after the
+final beep. A detent is crossed at the *midpoint* between two cards, so at the
+last crossing the chosen card is still 308px out and travelling at 950px/s: the
+ear would be told it had landed while the eye could see it flying. That long last
+interval isn't a gap in the ritardando, it's the ritardando resolving.
+
+**And the pocket answers you.** Its first two layers are the drop — a triangle
+falling 420→190Hz for the weight, brown noise for the rattle — but a third layer
+sits underneath: a sine rising a fifth, 520→780Hz. That's a deliberate reversal
+of the file's own rule. Unlike every other sound here it isn't feedback on
+something you did, it's the machine's **answer** to something you asked, and
+ending four seconds of counting on a pure thud left the moment mechanically
+correct and dramatically flat. It stays *under* the drop at a third of the gain
+with a 70ms attack, so the thud is what lands and the tone is what it settles
+into — the slow attack doing the work of a delay, which an `Envelope` here has no
+field for. Any louder or sharper and it's a jackpot fanfare, which this is not:
+you've been given a film, not a win.
 
 **Reduced motion mutes it.** The library's hooks silence themselves when
 `prefers-reduced-motion` is set, so a viewer who asked for less gets silence without any
@@ -2208,9 +2346,9 @@ What this means in practice:
 - The site works **offline** once loaded (except Move's posters).
 - It can be hosted anywhere that serves static files — no server, no runtime cost.
 - Editing content means editing a data file, not hunting through markup.
-- And, to be clear: **the AI summary is pre-written text, not a live model call**, the
-  Listen button plays no audio, the currency rates are not real, the community link
-  host (`innercircle.club`) is invented, and no form submits anywhere.
+- And, to be clear: **the AI summary is pre-written text, not a live model
+  call**, the Listen button plays no audio — it advances a highlight through the
+  text at 150 words per minute — and the currency rates are not real.
 
 ---
 
@@ -2339,10 +2477,7 @@ InteractComponents/
     │   ├── ArticleReader.tsx
     │   ├── Portfolio.tsx
     │   ├── MembershipDashboard.tsx
-    │   ├── Move.tsx              The film wheel (~2,180 lines)
-    │   ├── ChatView.tsx          Fixed-stage chat client
-    │   ├── JoinGroup.tsx         Three-screen onboarding (~1,820 lines)
-    │   └── WritersGarden.tsx     Rail + DNA helix (~2,130 lines)
+    │   └── Move.tsx              The film wheel (~2,180 lines)
     │
     ├── components/            ~40 UI building blocks
     │   ├── DesktopOnly.tsx       The viewport gate + mobile notice
@@ -2358,35 +2493,14 @@ InteractComponents/
     │   ├── OutlineMinimap.tsx    Article outline with magnification
     │   ├── useActiveSection.ts   Which section the pane is showing
     │   ├── reading.ts            Word tokeniser for the read-along highlight
-    │   ├── useReadingCursor.ts   Advances the highlight at a reading pace
-    │   ├── ArticleBody/Header, AiSummary, HatchBand, ListenButton,
-    │   │   AskAiFab, ActionsBar, PublishedMeta, TagPill, AuthorAvatars
-    │   │
-    │   ├── PortfolioSheet.tsx    Shared shell for both Portfolio views
-    │   ├── PortfolioInsights.tsx Drill-down view
-    │   ├── HoldingsTable, AllocationBar, PieTooltip,
-    │   │   CurrencySelect, MonthSelect, FlagUs, PillButton
-    │   │
-    │   ├── MiddleTruncate.tsx    head… tail, snapped to whole words
-    │   ├── useSquircle.ts        Figma corner smoothing as an SVG path
-    │   │
-    │   ├── ChatShell.tsx         Chat View's shared primitives
-    │   ├── RailGhostViews.tsx    The rail's other four destinations
-    │   │
-    │   ├── GlowField.tsx         Live WebGL washes (Join Group)
-    │   ├── social-marks.tsx      X / LinkedIn / WhatsApp glyphs
-    │   │
-    │   ├── BadgeHelix.tsx        The DNA helix renderer (Writers Garden)
-    │   ├── SpinningBadge.tsx     WebGL turning badge (Writers Garden panel)
-    │   │
+    │   ├── useReadingCursor.ts   Advances the highlight; idle/playing/paused
+    │   ├── …                     Article, Portfolio and shared components
     │   ├── icons.tsx             Inline SVG icons (inherit colour, animate)
     │   ├── dither-kit/           The vendored chart engine (~30 files)
     │   └── ui/button.tsx         shadcn scaffold — currently unused
     │
     ├── lib/                    Logic and data, no UI
-    │   ├── motion.ts             All timings, easings, springs
-    │   ├── spring.ts             Analytically solved harmonic oscillator
-    │   ├── ponpon.ts             GPU tiering, frame budget, damping, boil
+    │   ├── motion.ts             Timings, easings, six springs, spin constants
     │   ├── sound.ts              The synthesised sound palette
     │   ├── confetti.ts           The three-shot celebration burst
     │   ├── squircle.ts           The corner-smoothing maths
@@ -2514,17 +2628,14 @@ Honest list of things that are in the repo but not doing what you might expect:
 
 ## The one-paragraph summary
 
-**Vite** builds and serves the site. **React 19** draws the interface from state.
-**TypeScript** catches mistakes before they run. **Tailwind v4** styles everything
-through short class names built on a custom token set in `index.css`. **Framer Motion**
-handles declarative animation with all timings centralised in `lib/motion.ts`, while
-**GSAP** owns the per-frame pointer-driven work — and the two never write to the same
-element. **dither-kit** paints the charts onto a canvas, **glimm** paints the WebGL
-transition between views, three bespoke WebGL renderers draw the Join Group glow field,
-the Writers Garden helix and its spinning badge, and **@web-kits/audio** synthesises the
-two sounds the film wheel makes. `lib/spring.ts` solves springs analytically so they are
-frame-rate independent and cannot diverge; `lib/ponpon.ts` tiers the GPU once at boot and
-lets every expensive feature ask for itself by name. Seven demos live in a registry; the
-URL hash decides which one shows, and below 1024px a single gate replaces all of it.
-Effectively all the data ships with the site — only Move's poster artwork is fetched at
-runtime — so there is no backend and nothing to go down.
+**Vite** builds and serves the site. **React** draws the interface from state —
+change a value, and the screen follows. **TypeScript** catches mistakes before
+they run. **Tailwind** styles everything through short class names built on a
+custom token set in `index.css`. **Framer Motion** handles every animation, with
+all timings centralised in `lib/motion.ts`. **dither-kit** paints the charts onto
+a canvas, **glimm** paints the WebGL transition between views, and
+**@web-kits/audio** synthesises the only sounds in the project — the detent, the
+beep and the pocket, all three of them the film wheel turning. Five demos
+live in a registry; the URL hash decides which one shows. Effectively all the
+data ships with the site — only Move's poster artwork is fetched at runtime — so
+there is no backend and nothing to go down.
