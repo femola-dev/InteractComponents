@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useRise } from '../components/rise'
-import { blurMorph, springSnap, transitionFast } from '../lib/motion'
+import { blurMorph, springSnap, transitionFast, transitionSmooth } from '../lib/motion'
 import { lighten } from '../lib/color'
 import { MEMBERS, TIERS, COMPANY_LOGOS, COMPANY_NAMES } from '../lib/members'
 import type { TierId, CompanyId, Member } from '../lib/members'
@@ -16,7 +16,6 @@ import iconMagicWandActive from '../assets/icons/active_magic-wand-2.svg'
 import iconMagicWandInactive from '../assets/icons/inactive_magic-wand-2.svg'
 import iconGroup3Active from '../assets/icons/active_group-3.svg'
 import iconGroup3Inactive from '../assets/icons/inactive_group-3.svg'
-import iconGroup3Dark from '../assets/icons/group-3-dark.svg'
 import iconGroup3Muted from '../assets/icons/group-3-muted.svg'
 import iconWorldActive from '../assets/icons/active_world.svg'
 import iconWorldInactive from '../assets/icons/inactive_world.svg'
@@ -60,7 +59,14 @@ const WORKSPACES = [
 ] as const
 
 const SIDEBAR_LINK_SHADOW = '0px 0.254px 0.507px rgba(0,0,0,0.2), 0px 0px 1.521px rgba(30,62,126,0.2)'
-const NAV_PILL_SPRING = { type: 'spring', stiffness: 500, damping: 40, mass: 0.6 } as const
+/* A small underdamped spring gives the bar a short physical follow-through
+   when the pointer crosses rows: ζ ≈ 0.83, roughly 1% overshoot. */
+const NAV_PILL_SPRING = { type: 'spring', stiffness: 480, damping: 28, mass: 0.6 } as const
+
+/* The badge is a small, non-bouncy second-order system. At these values
+   ζ = c / (2√(km)) ≈ 1.00 and ωn = √(k/m) ≈ 28.3 rad/s, so it settles in
+   about 140ms without overshooting or losing velocity when the rail reverses. */
+const NAV_BADGE_SPRING = { type: 'spring', stiffness: 480, damping: 34, mass: 0.6 } as const
 
 type SortKey = 'name' | 'email' | 'tier' | 'company' | 'dateJoined'
 type SortDir = 'asc' | 'desc'
@@ -312,14 +318,15 @@ function FilterableColLabel<T extends string>({
 
 /** Nav-row highlight — the "Hover" asset from Figma: a soft blurred glow bar
  * that bleeds past both edges of whichever row is active or moused over.
- * Shared across rows via layoutId so it slides between them instead of
- * popping in and out. */
-function NavHoverPill() {
+ * One persistent layer follows the hovered row so it trails rather than
+ * disappearing and remounting between pointer events. */
+function NavHoverPill({ index, visible }: { index: number; visible: boolean }) {
   return (
     <motion.div
-      layoutId="nav-hover-pill"
-      transition={NAV_PILL_SPRING}
-      className="pointer-events-none absolute inset-y-[2px] left-[-29px] right-[-4px]"
+      initial={false}
+      animate={{ y: index * 34 + 2, opacity: visible ? 1 : 0 }}
+      transition={{ y: NAV_PILL_SPRING, opacity: { duration: 0.12, ease: 'easeOut' } }}
+      className="pointer-events-none absolute left-[-29px] top-0 z-0 h-[12px] w-[217px]"
     >
       <div className="absolute -inset-x-[4.61%] -inset-y-[83.33%]">
         <img src={iconHover} alt="" className="block size-full" />
@@ -451,7 +458,7 @@ function ReceiptBody({ pending }: { pending: PendingVerdict }) {
   const memberLabel = pending.count === 1 ? 'member' : 'members'
 
   return (
-    <div className="flex flex-col gap-[4px] rounded-[6px] bg-white px-[8px] py-[8px]" role="status" aria-live="polite">
+    <div className="flex h-full w-full flex-col gap-[4px] rounded-[6px] bg-white px-[8px] py-[8px]" role="status" aria-live="polite">
       <div className="flex items-center gap-[6px]">
         <span aria-hidden className="size-[8px] shrink-0 rounded-full" style={{ backgroundColor: VERDICT_COLOR[pending.verdict] }} />
         <span
@@ -523,6 +530,11 @@ function SelectionCount({ count }: { count: number }) {
  *  the narrower revert button swaps in without the footer reflowing. */
 const ACTION_SLOT_WIDTH = 184
 
+/* State changes inside the composer are quick but not abrupt. With k=520,
+   c=38 and m=0.6, ζ ≈ 1.08: critically/softly overdamped, so the morph
+   settles in roughly 130ms without the shell overshooting its bounds. */
+const COMPOSER_MORPH_SPRING = { type: 'spring', stiffness: 520, damping: 38, mass: 0.6 } as const
+
 /** Bulk-action composer (Figma 332:4525). Springs up over the table area the
  *  moment the first member is checked and stays for as long as anything is
  *  selected, so a verdict on the selection is always within reach — no toolbar
@@ -530,14 +542,14 @@ const ACTION_SLOT_WIDTH = 184
  *  ⌘/Ctrl+Enter accepts, Escape drops the selection. The message is optional,
  *  so the buttons are never blocked on typing.
  *
- *  Geometry is 1:1 with the frame: 433px shell, 2px inset around the 104px
- *  white field, then a 32px footer row inset a further 2px — selection count
- *  on the left, verdict buttons on the right.
+ *  Geometry is 1:1 with the frame: 433px shell, 2px inset around a fixed
+ *  104px morph stage, then a 32px footer row inset a further 2px — selection
+ *  count on the left, verdict buttons on the right.
  *
  *  The same shell carries the post-send receipt, and only the two parts that
- *  actually differ morph: the white field, and the action slot. The shell, the
- *  footer row, and the count chip are one continuous element across both
- *  states — nothing that stays the same is allowed to animate. */
+ *  actually differ morph: the fixed white field stage, and the action slot.
+ *  The shell, footer row, and count chip keep their geometry across both
+ *  states — nothing that stays the same is allowed to stretch. */
 function BulkComposePanel({ count, pending, onDecision, onRevert, onCommit, onDismiss }: { count: number; pending: PendingVerdict | null; onDecision: (verdict: Verdict, message: string) => void; onRevert: () => void; onCommit: () => void; onDismiss: () => void }) {
   const [message, setMessage] = useState('')
 
@@ -555,41 +567,41 @@ function BulkComposePanel({ count, pending, onDecision, onRevert, onCommit, onDi
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 8, scale: 0.98 }}
         transition={springSnap}
-        layout
         className="pointer-events-auto flex w-[433px] max-w-full flex-col gap-[4px] overflow-hidden rounded-[8px] bg-[#f1f1f1] p-[2px]"
         style={{ boxShadow: `${ACTION_BUTTON_SHADOW}, ${ACTION_BUTTON_BEVEL}` }}
       >
-        {/* Field. `popLayout` drops the outgoing copy out of flow on frame one,
-            so the shell starts resizing to the incoming height immediately
-            instead of waiting out the exit — the blur morph and the height
-            spring then run as a single 0.25s move. */}
-        <AnimatePresence mode="popLayout" initial={false}>
-          {pending ? (
-            <motion.div key="receipt" {...blurMorph}>
-              <ReceiptBody pending={pending} />
-            </motion.div>
-          ) : (
-            <motion.textarea
-              key="compose"
-              {...blurMorph}
-              value={message}
-              onChange={e => setMessage(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  onDismiss()
-                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault()
-                  decide('accepted')
-                }
-              }}
-              placeholder={count === 1 ? 'Compose message to selected member...' : 'Compose message to selected members...'}
-              aria-label="Message to selected members"
-              className="h-[104px] w-full resize-none rounded-[6px] bg-white px-[8px] py-[8px] text-[13px] text-[#1c221d] outline-none placeholder:text-[#878f88]"
-              style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"dlig" 1', letterSpacing: '-0.13px', lineHeight: '18px' }}
-            />
-          )}
-        </AnimatePresence>
+        {/* Fixed stage: the textarea and receipt occupy the same 104px field,
+            so the shell never resizes when the verdict is submitted or reverted. */}
+        <div className="relative h-[104px] w-full">
+          <AnimatePresence mode="sync" initial={false}>
+            {pending ? (
+              <motion.div key="receipt" {...blurMorph} transition={COMPOSER_MORPH_SPRING} className="absolute inset-0">
+                <ReceiptBody pending={pending} />
+              </motion.div>
+            ) : (
+              <motion.textarea
+                key="compose"
+                {...blurMorph}
+                transition={COMPOSER_MORPH_SPRING}
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    onDismiss()
+                  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault()
+                    decide('accepted')
+                  }
+                }}
+                placeholder={count === 1 ? 'Compose message to selected member...' : 'Compose message to selected members...'}
+                aria-label="Message to selected members"
+                className="absolute inset-0 h-full w-full resize-none rounded-[6px] bg-white px-[8px] py-[8px] text-[13px] text-[#1c221d] outline-none placeholder:text-[#878f88]"
+                style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"dlig" 1', letterSpacing: '-0.13px', lineHeight: '18px' }}
+              />
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Footer row is shared, so it never animates. The count chip holds the
             pending total while a receipt is up, which keeps the one number
@@ -599,11 +611,11 @@ function BulkComposePanel({ count, pending, onDecision, onRevert, onCommit, onDi
           <div className="relative h-[32px] shrink-0" style={{ width: ACTION_SLOT_WIDTH }}>
             <AnimatePresence initial={false}>
               {pending ? (
-                <motion.div key="revert" {...blurMorph} className="absolute right-0 top-0">
+                <motion.div key="revert" {...blurMorph} transition={COMPOSER_MORPH_SPRING} className="absolute right-0 top-0">
                   <RevertButton onRevert={onRevert} onExpire={onCommit} />
                 </motion.div>
               ) : (
-                <motion.div key="verdict" {...blurMorph} className="absolute right-0 top-0 flex items-center gap-[4px]">
+                <motion.div key="verdict" {...blurMorph} transition={COMPOSER_MORPH_SPRING} className="absolute right-0 top-0 flex items-center gap-[4px]">
                   <ActionButton label="Rejected" color="#da0000" onClick={() => decide('rejected')} />
                   <ActionButton label="Accepted" color="#02320f" onClick={() => decide('accepted')} />
                 </motion.div>
@@ -617,6 +629,243 @@ function BulkComposePanel({ count, pending, onDecision, onRevert, onCommit, onDi
 }
 
 
+/* ---- Lazy views ----------------------------------------------------------
+   Every nav item except Membership lands on a ghost of the view it would open.
+   Three rules keep these in the page's language rather than looking like a
+   generic skeleton kit dropped in:
+
+   1. Only greys already on the page. `#f1f1f1` is its row rule, composer shell
+      and hover tint; `#dfdfdf` is the rule under the page header and above the
+      pagination footer. Fills take the first, card edges the second — nothing
+      here introduces a grey the table doesn't already use.
+   2. Borders, never shadows. The only elevation on this page is the table's
+      column-header rule and the action buttons; a placeholder has no business
+      floating above either.
+   3. The same fluid scale (`clamp(min, cqw, max)`) and the same 12–16px gutter
+      as the table, so switching nav doesn't change the page's rhythm.
+
+   Every layout fills the content area rather than stacking at the top: the
+   view a ghost stands in for would use the whole pane, so the ghost has to as
+   well, or the nav reads as broken instead of unbuilt. */
+
+const GHOST_FILL = 'bg-[#f1f1f1]'
+const GHOST_EDGE = 'border-[#dfdfdf]'
+
+/** Placeholder fill. */
+function Ghost({ className = '', style }: { className?: string; style?: CSSProperties }) {
+  return <div className={`shrink-0 rounded-[4px] ${GHOST_FILL} ${className}`} style={style} />
+}
+
+/** One line of ghost text. */
+function GhostLine({ width, className = '' }: { width: string; className?: string }) {
+  return <Ghost className={`h-[clamp(8px,1cqw,10px)] ${className}`} style={{ width }} />
+}
+
+function GhostCard({ children, className = '' }: { children?: ReactNode; className?: string }) {
+  return (
+    <div className={`flex min-h-0 flex-col gap-[clamp(8px,1cqw,12px)] rounded-[8px] border ${GHOST_EDGE} p-[clamp(10px,1.3cqw,14px)] ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+/* Fixed, not random: a re-render must not reshuffle the chart. */
+const GHOST_BARS = [42, 68, 55, 83, 61, 74, 48, 90, 66, 52, 78, 59]
+
+function DashboardGhost() {
+  return (
+    <>
+      <div className="flex shrink-0 gap-[clamp(10px,1.3cqw,16px)]">
+        {[0, 1, 2, 3].map(i => (
+          <GhostCard key={i} className="flex-1">
+            <GhostLine width="45%" />
+            <Ghost className="h-[clamp(16px,2.2cqw,22px)] w-[65%]" />
+          </GhostCard>
+        ))}
+      </div>
+      <div className="flex min-h-0 flex-1 gap-[clamp(10px,1.3cqw,16px)]">
+        <GhostCard className="flex-[2]">
+          <GhostLine width="30%" />
+          <div className="flex min-h-0 flex-1 items-end gap-[clamp(4px,0.7cqw,8px)]">
+            {GHOST_BARS.map((h, i) => (
+              <Ghost key={i} className="flex-1" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </GhostCard>
+        <GhostCard className="flex-1 justify-between">
+          <GhostLine width="50%" />
+          {[0, 1, 2, 3, 4].map(i => (
+            <div key={i} className="flex items-center gap-[clamp(6px,0.9cqw,10px)]">
+              <Ghost className="size-[clamp(20px,2.6cqw,28px)] rounded-full" />
+              <GhostLine width={`${70 - i * 7}%`} />
+            </div>
+          ))}
+        </GhostCard>
+      </div>
+    </>
+  )
+}
+
+function ExploreGhost() {
+  return (
+    <>
+      <Ghost className="h-[clamp(28px,3.6cqw,36px)] w-full rounded-[8px]" />
+      <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-3 gap-[clamp(10px,1.3cqw,16px)]">
+        {[0, 1, 2, 3, 4, 5].map(i => (
+          <GhostCard key={i}>
+            <Ghost className="min-h-0 w-full flex-1 rounded-[6px]" />
+            <GhostLine width="80%" />
+            <GhostLine width="55%" />
+          </GhostCard>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function DomainExpertGhost() {
+  return (
+    <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-3 gap-[clamp(10px,1.3cqw,16px)]">
+      {[0, 1, 2, 3, 4, 5].map(i => (
+        <GhostCard key={i} className="justify-center">
+          <div className="flex items-center gap-[clamp(6px,0.9cqw,10px)]">
+            <Ghost className="size-[clamp(32px,4.2cqw,44px)] rounded-full" />
+            <div className="flex flex-1 flex-col gap-[clamp(5px,0.7cqw,8px)]">
+              <GhostLine width="70%" />
+              <GhostLine width="45%" />
+            </div>
+          </div>
+          <GhostLine width="100%" />
+          <GhostLine width="85%" />
+          <div className="flex gap-[clamp(4px,0.6cqw,6px)]">
+            {[0, 1, 2].map(j => (
+              <Ghost key={j} className="h-[clamp(14px,1.8cqw,18px)] w-[clamp(34px,5cqw,54px)] rounded-full" />
+            ))}
+          </div>
+        </GhostCard>
+      ))}
+    </div>
+  )
+}
+
+function AnalyticsGhost() {
+  return (
+    <>
+      <GhostCard className="flex-1">
+        <div className="flex items-center justify-between">
+          <GhostLine width="22%" />
+          <Ghost className="h-[clamp(18px,2.4cqw,24px)] w-[clamp(60px,8cqw,90px)] rounded-[6px]" />
+        </div>
+        <div className="flex min-h-0 flex-1 items-end gap-[clamp(6px,0.9cqw,12px)]">
+          {GHOST_BARS.map((h, i) => (
+            <Ghost key={i} className="flex-1 rounded-b-none rounded-t-[4px]" style={{ height: `${h}%` }} />
+          ))}
+        </div>
+        <div className="h-px w-full shrink-0 bg-[#dfdfdf]" />
+      </GhostCard>
+      <div className="flex shrink-0 gap-[clamp(10px,1.3cqw,16px)]">
+        {[0, 1, 2].map(i => (
+          <GhostCard key={i} className="flex-1">
+            <GhostLine width="40%" />
+            <Ghost className="h-[clamp(16px,2.2cqw,22px)] w-[55%]" />
+            <GhostLine width="70%" />
+          </GhostCard>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function AutomationsGhost() {
+  return (
+    <div className={`flex min-h-0 flex-1 flex-col rounded-[8px] border ${GHOST_EDGE}`}>
+      {[0, 1, 2, 3, 4, 5].map(i => (
+        <div
+          key={i}
+          className={`flex flex-1 items-center gap-[clamp(8px,1.1cqw,12px)] px-[clamp(10px,1.3cqw,14px)] ${i === 5 ? '' : `border-b ${GHOST_EDGE}`}`}
+        >
+          <Ghost className="size-[clamp(24px,3cqw,32px)] rounded-[6px]" />
+          <div className="flex flex-1 flex-col gap-[clamp(5px,0.7cqw,8px)]">
+            <GhostLine width={`${52 - i * 4}%`} />
+            <GhostLine width={`${34 - i * 2}%`} />
+          </div>
+          {/* Toggle-shaped, so the row reads as a rule you can switch. */}
+          <Ghost className="h-[clamp(16px,2cqw,20px)] w-[clamp(28px,3.6cqw,36px)] rounded-full" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SettingsGhost() {
+  return (
+    <>
+      {[0, 1, 2].map(section => (
+        <div key={section} className="flex flex-1 flex-col justify-center gap-[clamp(10px,1.3cqw,16px)]">
+          <GhostLine width="18%" className="h-[clamp(10px,1.3cqw,13px)]" />
+          {[0, 1].map(row => (
+            <div key={row} className="flex items-center justify-between gap-12">
+              <GhostLine width="16%" />
+              <Ghost className="h-[clamp(26px,3.4cqw,34px)] w-[800px] min-w-[960px] max-w-[960px] flex-1 rounded-[6px]" />
+            </div>
+          ))}
+          {/* A real rule, not a ghost: the page separates its own sections with
+              this exact hairline. */}
+          {section < 2 && <div className="mt-auto h-px w-full bg-[#dfdfdf]" />}
+        </div>
+      ))}
+    </>
+  )
+}
+
+const GHOST_VIEWS: Record<string, () => ReactNode> = {
+  Dashboard: DashboardGhost,
+  Explore: ExploreGhost,
+  'Domain Expert': DomainExpertGhost,
+  Analytics: AnalyticsGhost,
+  Automations: AutomationsGhost,
+  Settings: SettingsGhost,
+}
+
+/**
+ * The stand-in for a view that isn't built. Each nav item gets a layout shaped
+ * like the thing it would open — tiles and a chart for Dashboard, a card grid
+ * for Explore, switch rows for Automations — so the sidebar still teaches what
+ * lives where instead of showing one generic grey page six times.
+ *
+ * Two nested elements rather than one, because the entrance fade and the idle
+ * pulse both drive `opacity`: on a single node the later `animate` silently
+ * replaces the earlier one, which is exactly how the blur got stuck on before.
+ *
+ * The pulse runs on one slow cycle for the whole surface rather than per block
+ * — one pulse says "placeholder", forty say "loading", and nothing here is
+ * actually loading. Reduced motion holds it still.
+ */
+function LazyView({ nav }: { nav: string }) {
+  const reducedMotion = useReducedMotion()
+  const View = GHOST_VIEWS[nav]
+  if (!View) return null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={transitionSmooth}
+      aria-hidden
+      className="flex min-h-0 flex-1 flex-col overflow-hidden p-[clamp(12px,1.5cqw,16px)]"
+    >
+      <motion.div
+        animate={reducedMotion ? undefined : { opacity: [1, 0.6, 1] }}
+        transition={reducedMotion ? undefined : { duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        className="flex min-h-0 flex-1 flex-col gap-[clamp(10px,1.3cqw,16px)]"
+      >
+        <View />
+      </motion.div>
+    </motion.div>
+  )
+}
+
+
 const PAGE_SIZES = [10, 15, 25, 50] as const
 
 export function MembershipDashboard() {
@@ -626,6 +875,7 @@ export function MembershipDashboard() {
   const verdictSeq = useRef(0)
   const [activeNav, setActiveNav] = useState('Membership')
   const [hoveredNav, setHoveredNav] = useState<string | null>(null)
+  const [navTooltip, setNavTooltip] = useState<{ label: string; x: number; y: number } | null>(null)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspace, setWorkspace] = useState<(typeof WORKSPACES)[number]>(WORKSPACES[0])
   const sidebarElevated = useMemo(() => lighten(workspace.sidebar, 6), [workspace])
@@ -757,6 +1007,9 @@ export function MembershipDashboard() {
   }, [allOnPageChecked, pageMembers])
 
   const selectedCount = checked.size
+  const activeNavItem = NAV_ITEMS.find(item => item.label === activeNav) ?? NAV_ITEMS[2]
+  const onMembership = activeNav === 'Membership'
+  const navHighlightIndex = Math.max(0, NAV_ITEMS.findIndex(item => item.label === (hoveredNav ?? activeNav)))
 
   const clearChecked = useCallback(() => setChecked(new Set()), [])
 
@@ -800,165 +1053,221 @@ export function MembershipDashboard() {
       className="@container relative flex h-svh w-full overflow-hidden bg-white"
     >
       {/* ---- Sidebar ---- */}
-      <AnimatePresence initial={false}>
-        {!collapsed && (
-          <motion.div
-            initial={{ width: 0, opacity: 0, backgroundColor: workspace.sidebar }}
-            animate={{ width: 'clamp(150px,15.5cqw,223px)', opacity: 1, backgroundColor: workspace.sidebar }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{
-              width: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
-              opacity: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
-              backgroundColor: { duration: 0.4, ease: 'easeOut' },
-            }}
-            className="relative h-full shrink-0 overflow-hidden"
-          >
-            <div className="absolute left-[clamp(12px,1.5cqw,16px)] top-[clamp(12px,1.5cqw,16px)] flex items-center gap-[6px]">
-              <motion.div
-                animate={{ backgroundColor: logoMarkColor }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="flex size-[clamp(20px,2.5cqw,24px)] shrink-0 items-center justify-center rounded-[25%]"
-              >
-                <img src={sailboatGlyph} alt="" className="w-[72%]" />
-              </motion.div>
-              <span
-                className="text-[clamp(15px,1.9cqw,18px)] font-semibold text-white whitespace-nowrap tracking-[-0.27px]"
-                style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1', textShadow: '0px 0.254px 0.507px rgba(0,0,0,0.2), 0px 0px 1.521px rgba(30,62,126,0.2)' }}
-              >
-                Sailor Pro<span className="text-[0.65em] align-top">®</span>
-              </span>
-            </div>
+      <motion.div
+        animate={{
+          width: collapsed ? 56 : 223,
+          backgroundColor: workspace.sidebar,
+        }}
+        transition={{
+          width: springSnap,
+          backgroundColor: { duration: 0.4, ease: 'easeOut' },
+        }}
+        className="relative h-full shrink-0 overflow-hidden"
+      >
+        {/* One physical control travels with the rail: right-aligned in the
+            expanded state, then into the centered icon column when minimized. */}
+        <motion.button
+          initial={false}
+          type="button"
+          onClick={() => { setCollapsed(value => !value); setNavTooltip(null) }}
+          animate={{ left: collapsed ? 20 : 183, rotate: collapsed ? 180 : 0 }}
+          transition={{ left: springSnap, rotate: springSnap }}
+          className="absolute top-[16px] z-20 flex h-6 w-4 cursor-pointer items-start justify-center opacity-60 transition-opacity duration-150 hover:opacity-100"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <img src={iconCollapseArrow} alt="" className="mt-1 size-4" />
+        </motion.button>
 
-            {/* Workspace selector */}
-            <div className="relative">
+        {/* ---- Expanded content ---- */}
+        <motion.div
+          animate={{ opacity: collapsed ? 0 : 1 }}
+          transition={{ opacity: { ...springSnap, delay: collapsed ? 0 : 0.08 } }}
+          className="pointer-events-auto absolute inset-0"
+          style={{ pointerEvents: collapsed ? 'none' : 'auto' }}
+        >
+          <div className="absolute left-[16px] top-[16px] flex items-center gap-[6px]">
+            <motion.div
+              animate={{ backgroundColor: logoMarkColor }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+              className="flex size-6 shrink-0 items-center justify-center rounded-[25%]"
+            >
+              <img src={sailboatGlyph} alt="" className="w-[72%]" />
+            </motion.div>
+            <span
+              className="text-[18px] font-semibold text-white whitespace-nowrap tracking-[-0.27px]"
+              style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1', textShadow: '0px 0.254px 0.507px rgba(0,0,0,0.2), 0px 0px 1.521px rgba(30,62,126,0.2)' }}
+            >
+              Sailor Pro<span className="text-[0.65em] align-top">®</span>
+            </span>
+          </div>
+
+          {/* Workspace selector */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setWorkspaceOpen(o => !o)}
+              className="absolute left-[14px] top-[56px] h-[28px] w-[189px] cursor-pointer overflow-hidden rounded-lg p-[6px]"
+              style={{ boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}
+            >
+              <div className="absolute inset-0 rounded-lg bg-white/7" style={{ backdropFilter: 'blur(21.2px)' }} />
+              <div className="relative flex items-center gap-[6px]">
+                <WorkspaceInitial workspace={workspace} className="size-4" />
+                <div className="flex flex-1 items-center justify-between">
+                  <span className="text-[14px] font-medium text-white whitespace-nowrap leading-[16px]" style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1, "dlig" 1' }}>
+                    {workspace.name}
+                  </span>
+                  <motion.img
+                    src={iconChevronGrabber}
+                    alt=""
+                    className="size-3"
+                    animate={{ rotate: workspaceOpen ? 180 : 0 }}
+                    transition={transitionFast}
+                  />
+                </div>
+              </div>
+              <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: 'inset 0px 1px 2px 0px rgba(149,149,149,0.1)' }} />
+            </button>
+
+            {workspaceOpen && (
               <button
                 type="button"
-                onClick={() => setWorkspaceOpen(o => !o)}
-                className="absolute left-[clamp(10px,1.3cqw,14px)] top-[clamp(44px,6.5cqw,56px)] w-[clamp(150px,15cqw,189px)] cursor-pointer overflow-hidden rounded-lg p-[clamp(4px,0.6cqw,6px)] opacity-60 transition-opacity duration-150 hover:opacity-80"
-                style={{ boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}
-              >
-                <div className="absolute inset-0 rounded-lg bg-white/7" style={{ backdropFilter: 'blur(21.2px)' }} />
-                <div className="relative flex items-center gap-[6px]">
-                  <WorkspaceInitial workspace={workspace} className="size-[clamp(12px,1.5cqw,16px)]" />
-                  <div className="flex flex-1 items-center justify-between">
-                    <span className="text-[clamp(12px,1.3cqw,14px)] font-medium text-white whitespace-nowrap leading-[16px]" style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1, "dlig" 1' }}>
-                      {workspace.name}
-                    </span>
-                    <motion.img
-                      src={iconChevronGrabber}
-                      alt=""
-                      className="size-3"
-                      animate={{ rotate: workspaceOpen ? 180 : 0 }}
-                      transition={transitionFast}
-                    />
-                  </div>
-                </div>
-                <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: 'inset 0px 1px 2px 0px rgba(149,149,149,0.1)' }} />
-              </button>
+                aria-hidden="true"
+                tabIndex={-1}
+                onClick={() => setWorkspaceOpen(false)}
+                className="fixed inset-0 z-20 cursor-default"
+              />
+            )}
 
+            <AnimatePresence>
               {workspaceOpen && (
-                <button
-                  type="button"
-                  aria-hidden="true"
-                  tabIndex={-1}
-                  onClick={() => setWorkspaceOpen(false)}
-                  className="fixed inset-0 z-20 cursor-default"
-                />
-              )}
-
-              <AnimatePresence>
-                {workspaceOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute left-[clamp(10px,1.3cqw,14px)] top-[clamp(78px,9.5cqw,90px)] z-30 w-[clamp(150px,15cqw,189px)] overflow-hidden rounded-lg py-1"
-                    style={{ backgroundColor: sidebarElevated, boxShadow: '0px 4px 12px rgba(0,0,0,0.3)' }}
-                  >
-                    {WORKSPACES.map(w => (
-                      <button
-                        key={w.name}
-                        type="button"
-                        onClick={() => { setWorkspace(w); setWorkspaceOpen(false) }}
-                        className={`flex w-full cursor-pointer items-center gap-[6px] px-[10px] py-[6px] text-[clamp(11px,1.2cqw,13px)] text-left transition-colors duration-100 ${w.name === workspace.name ? 'text-white bg-white/10' : 'text-[#939e95] hover:bg-white/5 hover:text-white'
-                          }`}
-                        style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1' }}
-                      >
-                        <WorkspaceInitial workspace={w} className="size-[clamp(11px,1.3cqw,14px)]" />
-                        {w.name}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Navigation */}
-            <div
-              className="absolute left-[clamp(14px,1.6cqw,19px)] top-[clamp(84px,10.5cqw,97px)] flex flex-col gap-[clamp(12px,2cqw,18px)]"
-              onMouseLeave={() => setHoveredNav(null)}
-            >
-              {NAV_ITEMS.map(item => {
-                const active = item.label === activeNav
-                const highlighted = (hoveredNav ?? activeNav) === item.label
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => setActiveNav(item.label)}
-                    onMouseEnter={() => setHoveredNav(item.label)}
-                    className="relative flex w-[clamp(123px,12.8cqw,184px)] cursor-pointer items-center gap-[6px] rounded-md -ml-[6px] px-[6px] py-[2px]"
-                  >
-                    {highlighted && <NavHoverPill />}
-                    <img
-                      src={active ? item.iconActive : item.iconInactive}
-                      alt=""
-                      className="relative z-10 size-[clamp(14px,1.8cqw,16px)] shrink-0"
-                    />
-                    <span
-                      className="relative z-10 text-[clamp(12px,1.3cqw,14px)] font-medium whitespace-nowrap leading-[16px]"
-                      style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1', color: active ? '#ffffff' : '#939e95', textShadow: SIDEBAR_LINK_SHADOW }}
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute left-[14px] top-[90px] z-30 w-[189px] overflow-hidden rounded-lg py-1"
+                  style={{ backgroundColor: sidebarElevated, boxShadow: '0px 4px 12px rgba(0,0,0,0.3)' }}
+                >
+                  {WORKSPACES.map(w => (
+                    <button
+                      key={w.name}
+                      type="button"
+                      onClick={() => { setWorkspace(w); setWorkspaceOpen(false) }}
+                      className={`flex w-full cursor-pointer items-center gap-[6px] px-[10px] py-[6px] text-[clamp(11px,1.2cqw,13px)] text-left transition-colors duration-100 ${w.name === workspace.name ? 'text-white bg-white/10' : 'text-[#939e95] hover:bg-white/5 hover:text-white'
+                        }`}
+                      style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1' }}
                     >
-                      {item.label}
-                    </span>
-                    {'badge' in item && (
-                      // Positioned independently of flex flow so its center always lands
-                      // on the collapse/minimize icon's center — same right-offset formula,
-                      // used as the alignment "crosshair" — regardless of viewport size.
-                      <span
-                        className="absolute z-10 flex shrink-0 items-center justify-center rounded-full pl-[clamp(3px,0.4cqw,5px)] pr-[clamp(2.5px,0.35cqw,4px)] py-[clamp(2.5px,0.35cqw,4px)]"
-                        style={{
-                          top: '50%',
-                          left: 'calc(clamp(150px,15.5cqw,223px) - clamp(10px,1.7cqw,24px) - clamp(14px,1.6cqw,19px) - 2px)',
-                          transform: 'translate(-50%, -50%)',
-                          boxShadow: '0px 0px 1.521px 0px rgba(30,62,126,0.2), 0px 0.254px 0.507px 0px rgba(0,0,0,0.2)',
-                        }}
-                      >
-                        <span aria-hidden className="absolute inset-0 rounded-full bg-[#da0000]" />
-                        <span className="relative text-[clamp(8px,1cqw,10px)] font-medium text-white tracking-[-0.2px] leading-[14px]" style={{ fontFamily: "'Inter Display', sans-serif" }}>
-                          {item.badge}
-                        </span>
-                        <span aria-hidden className="absolute inset-0 rounded-full" style={{ boxShadow: 'inset 0px -0.22px 0.394px 0px rgba(0,0,0,0.2), inset 0px 0.254px 0.254px 0px rgba(255,255,255,0.35), inset 0px 0px 1.013px 0px rgba(255,255,255,0.25)' }} />
+                      <WorkspaceInitial workspace={w} className="size-[clamp(11px,1.3cqw,14px)]" />
+                      {w.name}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+        </motion.div>
+
+        {/* ---- Collapsed content (chrome only — nav is shared) ---- */}
+        <motion.div
+          animate={{ opacity: collapsed ? 1 : 0 }}
+          transition={{ opacity: { ...springSnap, delay: collapsed ? 0.08 : 0 } }}
+          className="absolute inset-0"
+          style={{ pointerEvents: collapsed ? 'auto' : 'none' }}
+        >
+          {/* Workspace initial pill */}
+          <button
+            type="button"
+            onClick={() => { setCollapsed(false); setNavTooltip(null) }}
+            className="absolute left-[14px] top-[56px] flex h-[28px] w-[28px] cursor-pointer items-center justify-center overflow-hidden rounded-lg p-[6px]"
+            style={{ boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}
+          >
+            <div className="absolute inset-0 rounded-lg bg-white/7" style={{ backdropFilter: 'blur(21.2px)' }} />
+            <div className="absolute inset-0 pointer-events-none rounded-lg" style={{ boxShadow: 'inset 0px 1px 2px 0px rgba(149,149,149,0.1)' }} />
+            <WorkspaceInitial workspace={workspace} className="relative size-4" />
+          </button>
+        </motion.div>
+
+        {/* Shared nav — one tree so icons never remount or shift on collapse.
+            Rows keep the Figma geometry while labels and badges stay anchored
+            overlays; the collapsed row contracts to the icon hit target. */}
+        <div
+          className="absolute left-[20px] top-[97px] z-10 flex flex-col gap-[18px]"
+          onMouseLeave={() => { setHoveredNav(null); setNavTooltip(null) }}
+        >
+          <NavHoverPill index={navHighlightIndex} visible={!collapsed} />
+          {NAV_ITEMS.map(item => {
+            const active = item.label === activeNav
+            return (
+              <motion.button
+                initial={false}
+                key={item.label}
+                type="button"
+                onClick={() => setActiveNav(item.label)}
+                onMouseEnter={e => {
+                  setHoveredNav(item.label)
+                  if (collapsed) {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    setNavTooltip({
+                      label: item.label,
+                      x: rect.right + 10,
+                      y: rect.top + rect.height / 2,
+                    })
+                  }
+                }}
+                onMouseLeave={() => {
+                  setNavTooltip(null)
+                }}
+                className="relative z-[1] h-4 cursor-pointer text-left"
+                animate={{ width: collapsed ? 16 : 184 }}
+                transition={{ width: springSnap }}
+                aria-label={item.label}
+              >
+                <img
+                  src={active ? item.iconActive : item.iconInactive}
+                  alt=""
+                  className="absolute left-0 top-0 z-10 size-4 shrink-0"
+                />
+                <motion.span
+                  animate={{ opacity: collapsed ? 0 : 1 }}
+                  transition={{ opacity: springSnap }}
+                  className="pointer-events-none absolute left-[22px] top-1/2 z-10 -translate-y-1/2 text-[14px] font-medium whitespace-nowrap leading-[16px]"
+                  style={{
+                    fontFamily: "'Inter Display', sans-serif",
+                    fontFeatureSettings: '"salt" 1',
+                    color: active ? '#ffffff' : '#939e95',
+                    textShadow: SIDEBAR_LINK_SHADOW,
+                  }}
+                >
+                  {item.label}
+                </motion.span>
+                {/* Keep the tag at its Figma x-position while the row width
+                    contracts. Its old `right: 0` anchor made it fly left
+                    through the icon rail during collapse. */}
+                {'badge' in item && (
+                  <span className="pointer-events-none absolute left-[155px] top-1/2 z-10 -translate-y-1/2">
+                    <motion.span
+                      animate={{ opacity: collapsed ? 0 : 1, scale: collapsed ? 0.86 : 1 }}
+                      transition={NAV_BADGE_SPRING}
+                      className="flex items-center justify-center rounded-full pl-[5px] pr-[4px] py-[4px]"
+                      style={{
+                        transformOrigin: 'right center',
+                        boxShadow: '0px 0px 1.521px 0px rgba(30,62,126,0.2), 0px 0.254px 0.507px 0px rgba(0,0,0,0.2)',
+                      }}
+                    >
+                      <span aria-hidden className="absolute inset-0 rounded-full bg-[#da0000]" />
+                      <span className="relative text-[10px] font-medium text-white tracking-[-0.2px] leading-[14px]" style={{ fontFamily: "'Inter Display', sans-serif" }}>
+                        {item.badge}
                       </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-
-            <button type="button" onClick={() => setCollapsed(true)} className="absolute right-[clamp(10px,1.7cqw,24px)] top-[clamp(16px,2cqw,20px)] flex size-4 cursor-pointer items-center justify-center opacity-60 transition-opacity duration-150 hover:opacity-100">
-              <img src={iconCollapseArrow} alt="" className="size-4" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {collapsed && (
-        <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} type="button" onClick={() => setCollapsed(false)} className="absolute left-0 top-5 z-10 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-r-md opacity-60 transition-opacity duration-150 hover:opacity-100" style={{ backgroundColor: workspace.sidebar, boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}>
-          <img src={iconCollapseArrow} alt="" className="size-4 rotate-180" />
-        </motion.button>
-      )}
+                      <span aria-hidden className="absolute inset-0 rounded-full" style={{ boxShadow: 'inset 0px -0.22px 0.394px 0px rgba(0,0,0,0.2), inset 0px 0.254px 0.254px 0px rgba(255,255,255,0.35), inset 0px 0px 1.013px 0px rgba(255,255,255,0.25)' }} />
+                    </motion.span>
+                  </span>
+                )}
+              </motion.button>
+            )
+          })}
+        </div>
+      </motion.div>
 
       {/* ---- Main Content ---- */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -966,14 +1275,21 @@ export function MembershipDashboard() {
         <div className="flex h-[clamp(40px,5.5cqw,49px)] shrink-0 items-center justify-between border-b border-[#dfdfdf] bg-white">
           <div className="flex items-center gap-[6px] pl-[clamp(12px,1.5cqw,16px)]">
             <div className="flex size-[clamp(14px,1.8cqw,16px)] shrink-0 items-center justify-center overflow-hidden rounded-[2px] bg-white">
-              <img src={iconGroup3Dark} alt="" className="size-full" />
+              {/* The sidebar's active icon, filtered to the label's own ink
+                  (#1C221D) so every heading reads identically. */}
+              <img
+                src={activeNavItem.iconActive}
+                alt=""
+                className="size-full"
+                style={{ filter: 'brightness(0) saturate(100%) invert(10%) sepia(10%) saturate(500%) hue-rotate(90deg) brightness(95%)' }}
+              />
             </div>
             <span className="text-[clamp(14px,1.6cqw,16px)] font-semibold text-[#1c221d] whitespace-nowrap leading-[20px]" style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1, "dlig" 1' }}>
-              Membership
+              {activeNav}
             </span>
           </div>
           <AnimatePresence>
-            {selectedCount > 0 && (
+            {onMembership && selectedCount > 0 && (
               <motion.span initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="mr-4 text-[clamp(11px,1.3cqw,13px)] text-[#878f88]" style={{ fontFamily: "'Inter Display', sans-serif", ...INTER_FEATURES }}>
                 {selectedCount} selected
               </motion.span>
@@ -981,141 +1297,169 @@ export function MembershipDashboard() {
           </AnimatePresence>
         </div>
 
-        {/* Table */}
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          {/* Column headers */}
-          <div className="relative flex h-[clamp(30px,4cqw,36px)] shrink-0 items-center bg-white" style={{ boxShadow: '0px 2px 2px 0px rgba(0,0,0,0.08), 0px 0px 0px 0.5px rgba(0,0,0,0.12)' }}>
-            <div className={`flex shrink-0 items-center ${COL.check} pl-[clamp(12px,1.5cqw,16px)]`}>
-              <button type="button" onClick={toggleSelectAll} className="flex cursor-pointer items-center" aria-label={allOnPageChecked ? 'Deselect all' : 'Select all'}>
-                <img src={allOnPageChecked ? iconSquareCheck : iconSquareUncheck} alt="" className="size-[clamp(14px,1.8cqw,16px)]" />
-              </button>
-            </div>
-            <div className={`flex shrink-0 items-center gap-[clamp(4px,0.8cqw,8px)] ${COL.name}`}>
-              <ColLabel column="name" label="Name" />
-            </div>
-            <div className={`flex shrink-0 items-center ${COL.email}`}>
-              <ColLabel column="email" label="Email address" />
-            </div>
-            <div className={`flex shrink-0 items-center ${COL.tier}`}>
-              <FilterableColLabel
-                column="tier"
-                label="Tier"
-                sortKey={sortKey}
-                sortDir={sortDir}
-                onSort={handleSort}
-                options={TIER_OPTIONS}
-                selected={tierFilter}
-                onToggleOption={toggleTierFilter}
-                onClear={clearTierFilter}
-                open={openFilter === 'tier'}
-                onOpenChange={open => setOpenFilter(open ? 'tier' : null)}
-              />
-            </div>
-            <div className={`flex shrink-0 items-center ${COL.company}`}>
-              <FilterableColLabel
-                column="company"
-                label="Company"
-                sortKey={sortKey}
-                sortDir={sortDir}
-                onSort={handleSort}
-                options={COMPANY_OPTIONS}
-                selected={companyFilter}
-                onToggleOption={toggleCompanyFilter}
-                onClear={clearCompanyFilter}
-                open={openFilter === 'company'}
-                onOpenChange={open => setOpenFilter(open ? 'company' : null)}
-              />
-            </div>
-            <div className="flex flex-1 items-center">
-              <ColLabel column="dateJoined" label="Date joined" staticIcon />
-            </div>
-          </div>
-
-          {/* Data rows */}
-          <div className="min-h-0 flex-1 overflow-auto" onScroll={handleNameHoverEnd}>
-            <div className="flex flex-col">
-              {pageMembers.map((member, i) => (
-                <motion.div key={member.id} {...rise(0.05 + i * 0.02)}>
-                  <MemberRow
-                    member={member}
-                    checked={checked.has(member.id)}
-                    onToggle={toggleChecked}
-                    onNameHoverStart={handleNameHoverStart}
-                    onNameHoverMove={handleNameHoverMove}
-                    onNameHoverEnd={handleNameHoverEnd}
+        {onMembership ? (
+          <>
+            {/* Table */}
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              {/* Column headers */}
+              <div className="relative flex h-[clamp(30px,4cqw,36px)] shrink-0 items-center bg-white" style={{ boxShadow: '0px 2px 2px 0px rgba(0,0,0,0.08), 0px 0px 0px 0.5px rgba(0,0,0,0.12)' }}>
+                <div className={`flex shrink-0 items-center ${COL.check} pl-[clamp(12px,1.5cqw,16px)]`}>
+                  <button type="button" onClick={toggleSelectAll} className="flex cursor-pointer items-center" aria-label={allOnPageChecked ? 'Deselect all' : 'Select all'}>
+                    <img src={allOnPageChecked ? iconSquareCheck : iconSquareUncheck} alt="" className="size-[clamp(14px,1.8cqw,16px)]" />
+                  </button>
+                </div>
+                <div className={`flex shrink-0 items-center gap-[clamp(4px,0.8cqw,8px)] ${COL.name}`}>
+                  <ColLabel column="name" label="Name" />
+                </div>
+                <div className={`flex shrink-0 items-center ${COL.email}`}>
+                  <ColLabel column="email" label="Email address" />
+                </div>
+                <div className={`flex shrink-0 items-center ${COL.tier}`}>
+                  <FilterableColLabel
+                    column="tier"
+                    label="Tier"
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                    options={TIER_OPTIONS}
+                    selected={tierFilter}
+                    onToggleOption={toggleTierFilter}
+                    onClear={clearTierFilter}
+                    open={openFilter === 'tier'}
+                    onOpenChange={open => setOpenFilter(open ? 'tier' : null)}
                   />
-                </motion.div>
-              ))}
-            </div>
-          </div>
-
-          <AnimatePresence>
-            {(selectedCount > 0 || pending) && (
-              <BulkComposePanel
-                count={selectedCount}
-                pending={pending}
-                onDecision={handleBulkDecision}
-                onRevert={revertVerdict}
-                onCommit={commitVerdict}
-                onDismiss={clearChecked}
-              />
-            )}
-          </AnimatePresence>
-
-          {/* Footer / pagination */}
-          <div className="flex h-[clamp(40px,5cqw,44px)] shrink-0 items-center justify-between border-t border-[#dfdfdf] bg-white px-[clamp(12px,1.5cqw,16px)]">
-            <span className="text-[clamp(11px,1.2cqw,12px)] text-[#878f88] whitespace-nowrap" style={{ fontFamily: "'Inter Display', sans-serif", ...INTER_FEATURES }}>
-              Showing {sortedMembers.length === 0 ? 0 : pageStart + 1}–{Math.min(pageStart + pageSize, sortedMembers.length)} of {sortedMembers.length} members
-            </span>
-            <div className="flex items-center gap-[clamp(12px,1.5cqw,20px)]">
-              <div className="flex items-center gap-[6px]">
-                <span className="text-[clamp(11px,1.2cqw,12px)] text-[#878f88] whitespace-nowrap" style={{ fontFamily: "'Inter Display', sans-serif" }}>
-                  Rows per page
-                </span>
-                <select
-                  value={pageSize}
-                  onChange={e => handlePageSizeChange(Number(e.target.value) as (typeof PAGE_SIZES)[number])}
-                  className="cursor-pointer rounded-md border border-[#ededed] bg-white py-1 pl-2 pr-1 text-[clamp(11px,1.2cqw,12px)] text-[#5e645f] outline-none transition-colors hover:border-[#c4c9c5]"
-                  style={{ fontFamily: "'Inter Display', sans-serif" }}
-                >
-                  {PAGE_SIZES.map(size => (
-                    <option key={size} value={size}>{size}</option>
-                  ))}
-                </select>
+                </div>
+                <div className={`flex shrink-0 items-center ${COL.company}`}>
+                  <FilterableColLabel
+                    column="company"
+                    label="Company"
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                    options={COMPANY_OPTIONS}
+                    selected={companyFilter}
+                    onToggleOption={toggleCompanyFilter}
+                    onClear={clearCompanyFilter}
+                    open={openFilter === 'company'}
+                    onOpenChange={open => setOpenFilter(open ? 'company' : null)}
+                  />
+                </div>
+                <div className="flex flex-1 items-center">
+                  <ColLabel column="dateJoined" label="Date joined" staticIcon />
+                </div>
               </div>
-              <div className="flex items-center gap-[10px]">
-                <span className="text-[clamp(11px,1.2cqw,12px)] text-[#5e645f] whitespace-nowrap" style={{ fontFamily: "'Inter Display', sans-serif", ...INTER_FEATURES_DATE }}>
-                  Page {currentPage} of {totalPages}
+
+              {/* Data rows */}
+              <div className="min-h-0 flex-1 overflow-auto" onScroll={handleNameHoverEnd}>
+                <div className="flex flex-col">
+                  {pageMembers.map((member, i) => (
+                    <motion.div key={member.id} {...rise(0.05 + i * 0.02)}>
+                      <MemberRow
+                        member={member}
+                        checked={checked.has(member.id)}
+                        onToggle={toggleChecked}
+                        onNameHoverStart={handleNameHoverStart}
+                        onNameHoverMove={handleNameHoverMove}
+                        onNameHoverEnd={handleNameHoverEnd}
+                      />
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {(selectedCount > 0 || pending) && (
+                  <BulkComposePanel
+                    count={selectedCount}
+                    pending={pending}
+                    onDecision={handleBulkDecision}
+                    onRevert={revertVerdict}
+                    onCommit={commitVerdict}
+                    onDismiss={clearChecked}
+                  />
+                )}
+              </AnimatePresence>
+
+              {/* Footer / pagination */}
+              <div className="flex h-[clamp(40px,5cqw,44px)] shrink-0 items-center justify-between border-t border-[#dfdfdf] bg-white px-[clamp(12px,1.5cqw,16px)]">
+                <span className="text-[clamp(11px,1.2cqw,12px)] text-[#878f88] whitespace-nowrap" style={{ fontFamily: "'Inter Display', sans-serif", ...INTER_FEATURES }}>
+                  Showing {sortedMembers.length === 0 ? 0 : pageStart + 1}–{Math.min(pageStart + pageSize, sortedMembers.length)} of {sortedMembers.length} members
                 </span>
-                <div className="flex items-center gap-[4px]">
-                  <button
-                    type="button"
-                    disabled={currentPage <= 1}
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    aria-label="Previous page"
-                    className="flex size-6 cursor-pointer items-center justify-center rounded-md text-[13px] text-[#5e645f] transition-colors hover:bg-[#f1f1f1] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    type="button"
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                    aria-label="Next page"
-                    className="flex size-6 cursor-pointer items-center justify-center rounded-md text-[13px] text-[#5e645f] transition-colors hover:bg-[#f1f1f1] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
-                  >
-                    ›
-                  </button>
+                <div className="flex items-center gap-[clamp(12px,1.5cqw,20px)]">
+                  <div className="flex items-center gap-[6px]">
+                    <span className="text-[clamp(11px,1.2cqw,12px)] text-[#878f88] whitespace-nowrap" style={{ fontFamily: "'Inter Display', sans-serif" }}>
+                      Rows per page
+                    </span>
+                    <select
+                      value={pageSize}
+                      onChange={e => handlePageSizeChange(Number(e.target.value) as (typeof PAGE_SIZES)[number])}
+                      className="cursor-pointer rounded-md border border-[#ededed] bg-white py-1 pl-2 pr-1 text-[clamp(11px,1.2cqw,12px)] text-[#5e645f] outline-none transition-colors hover:border-[#c4c9c5]"
+                      style={{ fontFamily: "'Inter Display', sans-serif" }}
+                    >
+                      {PAGE_SIZES.map(size => (
+                        <option key={size} value={size}>{size}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-[10px]">
+                    <span className="text-[clamp(11px,1.2cqw,12px)] text-[#5e645f] whitespace-nowrap" style={{ fontFamily: "'Inter Display', sans-serif", ...INTER_FEATURES_DATE }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <div className="flex items-center gap-[4px]">
+                      <button
+                        type="button"
+                        disabled={currentPage <= 1}
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        aria-label="Previous page"
+                        className="flex size-6 cursor-pointer items-center justify-center rounded-md text-[13px] text-[#5e645f] transition-colors hover:bg-[#f1f1f1] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        disabled={currentPage >= totalPages}
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        aria-label="Next page"
+                        className="flex size-6 cursor-pointer items-center justify-center rounded-md text-[13px] text-[#5e645f] transition-colors hover:bg-[#f1f1f1] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        ) : (
+          /* Remount per nav so each ghost replays its entrance, the same
+             way the playground switcher remounts a whole playground. */
+          <LazyView key={activeNav} nav={activeNav} />
+        )}
       </div>
 
       {createPortal(
         <AnimatePresence>
           {hoverCard && <HoverProfileCard key={hoverCard.member.id} member={hoverCard.member} point={hoverCard.point} />}
+          {navTooltip && collapsed && (
+            <motion.span
+              key={navTooltip.label}
+              initial={{ opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -4 }}
+              transition={{ duration: 0.12, ease: [0.22, 1, 0.36, 1] }}
+              className="pointer-events-none fixed z-[100] -translate-y-1/2 whitespace-nowrap rounded-[6px] px-2 py-1 text-[12px] font-medium text-white leading-[16px]"
+              style={{
+                left: navTooltip.x,
+                top: navTooltip.y,
+                backgroundColor: sidebarElevated,
+                boxShadow: '0px 4px 12px rgba(0,0,0,0.3), 0px 0px 0px 0.5px rgba(255,255,255,0.08)',
+                fontFamily: "'Inter Display', sans-serif",
+                fontFeatureSettings: '"salt" 1',
+              }}
+            >
+              {navTooltip.label}
+            </motion.span>
+          )}
         </AnimatePresence>,
         document.body
       )}

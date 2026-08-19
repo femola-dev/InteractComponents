@@ -234,11 +234,25 @@ const BUTTON_H = 83
 const CUBE_GAP = 8
 const CUBE_RADIUS = BUTTON_H / 2 + CUBE_GAP
 /**
- * Roughly eleven times the button's height. Shallow enough that the roll has
- * real depth — the leaving face visibly recedes rather than just squashing —
- * and long enough that the near edge does not bow outward on the way past.
+ * The eye's distance from the screen plane — and it works backwards from how it
+ * reads, which is worth stating because it is the easy thing to get wrong.
+ * `perspective` is not "how much 3D"; it is how far away the viewer is standing.
+ * *Lowering* it walks the viewer closer, and closer is what exaggerates depth.
+ *
+ * At 400 the tilt keystones the button's near edge 13.7% wider than its far one,
+ * against 5.9% at the 900 this started on — two and a third times the effect.
+ * The roll gains with it: the arriving face reads 1.14x while the leaving one
+ * falls to 0.89x, so it recedes rather than merely turning, and the hover lift
+ * grows from a 1.6% swell to 3.6%.
+ *
+ * The floor is set by how near the geometry ever gets to the eye. Nothing here
+ * comes closer than about 40px — 14px of lift plus the 25.7px a corner swings
+ * through at 10 degrees of yaw — so 400 keeps the viewer a little over ten times
+ * further out than the nearest pixel. Under roughly 5x, straight edges start to
+ * bow and the face reads as a fisheye rather than as a plane; past that the
+ * geometry can cross the eye plane outright and the browser gives up on it.
  */
-const CUBE_PERSPECTIVE = 900
+const CUBE_PERSPECTIVE = 400
 
 /**
  * The roll's physics — a damped harmonic oscillator on the angle, solved rather
@@ -273,6 +287,27 @@ const ROLL_SETTLED = 0.05
 const ROLL_STILL = 2
 
 /**
+ * The pointer tilt that rides on top of the roll.
+ *
+ * Larger than the card tilt in Writers Garden — 4 and 6 degrees there, 6 and 10
+ * here — because tilt reads in proportion to the object, and this is a 296x83
+ * button rather than a 498x517 plate. The same angles that give a card presence
+ * leave a control this small looking merely crooked.
+ *
+ * Y is the bigger of the two on purpose: the button is three and a half times
+ * wider than it is tall, so there is far more surface to swing about the
+ * vertical axis and far less about the horizontal one before the near edge
+ * starts clipping through the label.
+ *
+ * The lift is toward the viewer, not up the screen. At `CUBE_PERSPECTIVE` it
+ * magnifies the face by 900/(900-14) — about 1.6% — which is the whole effect:
+ * the button comes to meet the cursor rather than growing under it.
+ */
+const TILT_X = 6
+const TILT_Y = 10
+const TILT_LIFT = 14
+
+/**
  * The entrance, without `fadeBlurIn`'s blur.
  *
  * Not a style preference — a `filter` of any value other than `none` makes an
@@ -288,21 +323,30 @@ const fadeRiseIn: Variants = {
 
 function Landing({ onStart }: { onStart: () => void }) {
   const cubeRef = useRef<HTMLSpanElement>(null)
+  const tiltRef = useRef<HTMLSpanElement>(null)
 
   /**
-   * One roll per hover.
+   * A quarter turn per hover, however fast they arrive.
+   *
+   * The obvious version of this guards re-entry while a roll is in flight, and
+   * that guard is a bug: the flip *looks* finished at ~133ms but the spring's
+   * tail does not satisfy the settle thresholds until ~517ms, so for 380ms the
+   * button silently swallows every hover. Nothing on screen explains why, which
+   * is exactly how it reads — "it doesn't flip every time".
+   *
+   * So there is no guard. `target` accumulates instead, and a hover mid-flight
+   * simply moves the goalpost another 90 degrees while the spring is still
+   * travelling — which the solver handles natively, because a damped oscillator
+   * chasing a moved target is the ordinary case and not a special one. Fast
+   * hovers read as one continuous roll rather than as a queue.
+   *
+   * That only works with four faces. Two can go 0 -> 90 and no further, which
+   * is what forced the reset, which is what forced the guard.
    *
    * GSAP drives the frame and the DOM write; the physics is `lib/spring.ts`.
-   * `quickSetter` rather than a tween, because there is no tween here to
-   * describe — the angle is integrated each frame from the spring's own state,
-   * and all GSAP has to do is put the number on the element. Same division of
-   * labour the Writers Garden helix uses, for the same reason.
-   *
-   * The reset is what keeps two faces sufficient: the cube can turn 90 degrees
-   * and no further, so on arrival it snaps back to zero — invisible, because the
-   * face that just landed is a copy of the one that left, and "identical" is the
-   * whole premise. Every hover is therefore the same quarter turn from the same
-   * place, with no four-sided cube and no running total of where it got to.
+   * `quickSetter` rather than a tween, because there is no tween to describe —
+   * the angle is integrated each frame from the spring's own state and all GSAP
+   * has to do is put the number on the element.
    */
   useEffect(() => {
     const cube = cubeRef.current
@@ -316,46 +360,124 @@ function Landing({ onStart }: { onStart: () => void }) {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
     if (!fine.matches || reduced.matches) return
 
-    const parent = cube.parentElement
-    if (!parent) return
+    const tilt = tiltRef.current
+    const parent = tilt?.parentElement
+    if (!tilt || !parent) return
 
+    /* Two layers, two owners, and that separation is the point: the tilt writes
+       to `tilt` and the roll writes to `cube`, so neither ever reads the other's
+       transform and the two compose for free because one is the other's parent.
+       One element carrying both would be a fight neither wins — the same
+       division of labour the Writers Garden rail uses between its scroll loop
+       and its hover layer.
+       `preserve-3d` on the tilt layer as well, or it flattens the cube inside
+       it into a single plane and the roll stops being a roll. */
+    gsap.set(tilt, { transformStyle: 'preserve-3d' })
     gsap.set(cube, { transformStyle: 'preserve-3d', z: -CUBE_RADIUS })
+
+    const ease = 'power3.out'
+    const toTiltX = gsap.quickTo(tilt, 'rotationX', { duration: 0.5, ease })
+    const toTiltY = gsap.quickTo(tilt, 'rotationY', { duration: 0.5, ease })
+    const toLift = gsap.quickTo(tilt, 'z', { duration: 0.45, ease })
     const setAngle = gsap.quickSetter(cube, 'rotationX', 'deg') as (v: number) => void
 
     const spin: SpringState = { x: 0, v: 0 }
-    let rolling = false
+    let target = 0
+    let running = false
 
-    const stop = () => {
-      gsap.ticker.remove(frame)
-      setAngle(0)
-      spin.x = 0
-      spin.v = 0
-      rolling = false
-    }
-
-    function frame(_time: number, deltaMs: number) {
+    const frame = (_time: number, deltaMs: number) => {
       // No clamp: the solver is exact at any step and unconditionally stable,
       // which is the entire reason it is a solution and not an integrator.
-      springStep(spin, 90, ROLL_FREQUENCY, ROLL_DAMPING, deltaMs / 1000)
-      if (Math.abs(spin.x - 90) < ROLL_SETTLED && Math.abs(spin.v) < ROLL_STILL) {
-        stop()
+      springStep(spin, target, ROLL_FREQUENCY, ROLL_DAMPING, deltaMs / 1000)
+      if (Math.abs(spin.x - target) < ROLL_SETTLED && Math.abs(spin.v) < ROLL_STILL) {
+        spin.x = target
+        spin.v = 0
+        setAngle(spin.x)
+        gsap.ticker.remove(frame)
+        running = false
         return
       }
       setAngle(spin.x)
     }
 
     const roll = () => {
-      if (rolling) return
-      rolling = true
-      spin.x = 0
-      spin.v = ROLL_IMPULSE
-      gsap.ticker.add(frame)
+      /* A full turn is the identity, so folding both numbers back by 360 is
+         invisible at any angle — mid-flight included — and keeps them from
+         growing without bound over a long session. */
+      if (spin.x >= 360 && target >= 360) {
+        spin.x -= 360
+        target -= 360
+      }
+      target += 90
+      /* A fresh flick, floored rather than added: each hover is its own strike,
+         so the face is struck rather than eased away — but five hovers in a
+         second must not stack into 4500 deg/s and fling the cube through half a
+         turn of overshoot. `max` gives every hover the same launch speed and
+         lets the spring keep authority over where it lands. */
+      spin.v = Math.max(spin.v, ROLL_IMPULSE)
+      if (!running) {
+        running = true
+        gsap.ticker.add(frame)
+      }
     }
 
-    parent.addEventListener('pointerenter', roll)
+    /* The pointer position is read once per frame rather than acted on per
+       event: a mouse can outrun the compositor, and only the newest position
+       matters. `quickTo` reuses one tween per property instead of allocating a
+       timeline on every move. */
+    let pointerX = 0
+    let pointerY = 0
+    let queued = false
+
+    const flush = () => {
+      queued = false
+      const rect = parent.getBoundingClientRect()
+      if (!rect.width || !rect.height) return
+      const nx = (pointerX - rect.left) / rect.width
+      const ny = (pointerY - rect.top) / rect.height
+      // Y is negated because pushing the pointer down should tip the top of the
+      // button away from the viewer, not toward.
+      toTiltY((nx * 2 - 1) * TILT_Y)
+      toTiltX(-(ny * 2 - 1) * TILT_X)
+    }
+
+    const onEnter = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return
+      pointerX = event.clientX
+      pointerY = event.clientY
+      toLift(TILT_LIFT)
+      flush()
+      roll()
+    }
+
+    const onMove = (event: PointerEvent) => {
+      pointerX = event.clientX
+      pointerY = event.clientY
+      if (queued) return
+      queued = true
+      requestAnimationFrame(flush)
+    }
+
+    const onLeave = () => {
+      toTiltX(0)
+      toTiltY(0)
+      toLift(0)
+    }
+
+    parent.addEventListener('pointerenter', onEnter)
+    parent.addEventListener('pointermove', onMove)
+    parent.addEventListener('pointerleave', onLeave)
+    // A press that ends off the button never fires `pointerleave`, and the tilt
+    // would stay stuck at whatever angle it was last given.
+    parent.addEventListener('pointercancel', onLeave)
+
     return () => {
-      parent.removeEventListener('pointerenter', roll)
+      parent.removeEventListener('pointerenter', onEnter)
+      parent.removeEventListener('pointermove', onMove)
+      parent.removeEventListener('pointerleave', onLeave)
+      parent.removeEventListener('pointercancel', onLeave)
       gsap.ticker.remove(frame)
+      gsap.killTweensOf(tilt)
     }
   }, [])
 
@@ -421,22 +543,33 @@ function Landing({ onStart }: { onStart: () => void }) {
         className="relative h-[83px] w-74 shrink-0 cursor-pointer rounded-[5px] text-2xl"
         style={{ perspective: CUBE_PERSPECTIVE }}
       >
-        <span ref={cubeRef} className="absolute inset-0 block">
-          {/* The resting face, level with the screen once the cube's own
-              setback is applied. */}
-          <span className={faceClass} style={{ ...faceStyle, transform: `translateZ(${CUBE_RADIUS}px)` }}>
-            {face}
-          </span>
-          {/* The copy, lying face-down along the bottom edge — `rotateX(-90deg)`
-              points its own +Z straight down, so `translateZ` carries it under
-              the button rather than toward the viewer. A 90° turn of the cube
-              brings it up to where the first one was. */}
-          <span
-            aria-hidden
-            className={faceClass}
-            style={{ ...faceStyle, transform: `rotateX(-90deg) translateZ(${CUBE_RADIUS}px)` }}
-          >
-            {face}
+        {/* The tilt layer. Separate from the cube so the two transforms never
+            share an element — see the effect for why that matters. */}
+        <span ref={tiltRef} className="absolute inset-0 block">
+          <span ref={cubeRef} className="absolute inset-0 block">
+            {/* Four, not two. Two faces can only turn a quarter before they run
+              out, which forces a reset, which forces a guard on re-entry — and
+              that guard is what ate hovers. Four means the cube just keeps
+              turning: face `k` faces the lens whenever the cube is at 90k, and
+              360 brings the first one back round.
+              They sit at `-90k` about X and then `CUBE_RADIUS` along their own
+              +Z, so k=0 is the front, k=1 is below, k=2 behind and k=3 above —
+              and a +90 turn always brings the one from below into view. */}
+            {[0, 1, 2, 3].map(k => (
+              <span
+                key={k}
+                // Only the resting face carries the label for assistive tech; the
+                // other three are the same words three more times.
+                aria-hidden={k > 0 || undefined}
+                className={faceClass}
+                style={{
+                  ...faceStyle,
+                  transform: `rotateX(${-90 * k}deg) translateZ(${CUBE_RADIUS}px)`,
+                }}
+              >
+                {face}
+              </span>
+            ))}
           </span>
         </span>
       </motion.button>
@@ -1298,18 +1431,18 @@ function CommunityForm({
                 cursor: blocked ? 'not-allowed' : 'pointer',
               }}
             >
-            {/* `mode="wait"` so the two labels never overlap in a box that is
+              {/* `mode="wait"` so the two labels never overlap in a box that is
                 exactly one line tall. */}
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={created ? 'done' : 'idle'}
-                variants={fadeBlurIn}
-                initial="hidden"
-                animate="visible"
-                exit="hidden"
-                transition={transitionFast}
-              >
-                {created ? COPY.submitted : COPY.submit}
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={created ? 'done' : 'idle'}
+                  variants={fadeBlurIn}
+                  initial="hidden"
+                  animate="visible"
+                  exit="hidden"
+                  transition={transitionFast}
+                >
+                  {created ? COPY.submitted : COPY.submit}
                 </motion.span>
               </AnimatePresence>
             </motion.button>
