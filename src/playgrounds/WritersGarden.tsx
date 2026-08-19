@@ -53,7 +53,6 @@ import {
   TILE_W,
   VERTICAL_PITCH,
   iconArrowUpRight,
-  iconDotGrid,
   type Badge,
   type LayoutMode,
 } from '../lib/writersGarden'
@@ -1290,21 +1289,24 @@ export function WritersGarden() {
         )}
       </div>
 
-      {/* Node 317:17934 — the title pill, with the layout toggle beside it.
-          The toggle is not in the design; it is set in the pill's own language
-          — same black, same radius — so it reads as part of the header rather
-          than as a control bolted onto the page.
+      {/* Node 328:23334 — the header nav: the title pill with the layout tabs
+          stacked under it, both sitting in a #f6f5f5 well. The design used to
+          have the toggle beside the pill at twice the type size; this is the
+          replacement, and the well is what makes the pair read as one control
+          rather than a label with a widget parked next to it — the tint only
+          shows in the 4px gutters around the tabs, so it works as a seam.
 
-          `pointer-events-none` on the bar and `auto` on the toggle: the rail
-          now runs the full height of the viewport, so this sits *on top of* its
-          scroll surface. Left solid it would be a dead strip across the top
-          where the wheel does nothing and a drag cannot start — and the pill is
-          a label, so it has no business swallowing either. Only the control
-          takes the pointer back. */}
-      <div className="pointer-events-none absolute top-9 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3">
-        <div className="flex items-center justify-center gap-3 rounded-xl bg-black py-3 pr-5 pl-3">
-          <img src={iconDotGrid} alt="" className="size-10 shrink-0" />
-          <p className="text-[40px] leading-[1.0008] font-semibold tracking-[-0.8px] whitespace-nowrap text-white">
+          `pointer-events-none` on the well and `auto` on the tabs: the rail
+          runs the full height of the viewport, so this sits *on top of* its
+          scroll surface. Left solid it would be a dead patch at the top where
+          the wheel does nothing and a drag cannot start — and the pill is a
+          label, so it has no business swallowing either. Only the tabs take
+          the pointer back. */}
+      <div className="pointer-events-none absolute top-9 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-1 rounded-xl bg-[#f6f5f5] pb-1">
+        {/* Node 317:17934 — full-bleed across the well, so the pill's own width
+            is what sizes the whole thing and the tab row centres under it. */}
+        <div className="flex w-full items-center justify-center rounded-xl bg-black px-5 py-3">
+          <p className="text-[20px] leading-[1.0008] font-semibold tracking-[-0.4px] whitespace-nowrap text-white">
             {COPY.title}
           </p>
         </div>
@@ -1477,7 +1479,7 @@ function LayoutToggle({
     <div
       role="radiogroup"
       aria-label="Badge layout"
-      className="flex shrink-0 items-center gap-1 rounded-xl bg-black p-1"
+      className="flex shrink-0 items-center gap-1"
     >
       {modes.map((mode, i) => {
         const selected = mode === value
@@ -1505,8 +1507,11 @@ function LayoutToggle({
               event.preventDefault()
               move(i, step)
             }}
-            className={`cursor-pointer rounded-lg px-4 py-2 text-[20px] leading-[1.0008] font-semibold tracking-[-0.4px] whitespace-nowrap transition-colors duration-200 ${
-              selected ? 'bg-white text-black' : 'bg-transparent text-white/55 hover:text-white'
+            // Fixed 82px per tab, as drawn: "Rail" and "Helix" set to
+            // different widths, and letting them size to their own text would
+            // shift the row's centre — and the pill above it — on every switch.
+            className={`w-[82px] cursor-pointer rounded-[12px] px-5 py-3 text-[20px] leading-[1.0008] font-semibold tracking-[-0.4px] whitespace-nowrap transition-colors duration-200 ${
+              selected ? 'bg-black text-white' : 'bg-[#e1e1e1] text-[#888] hover:text-black'
             }`}
           >
             {LAYOUTS[mode]}
