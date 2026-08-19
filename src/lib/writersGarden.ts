@@ -363,10 +363,10 @@ export const PANEL_BADGE_BACK = '#c2a35c'
 
 /* ---- The helix ----
  *
- * The vertical layout winds the twelve badges up a double helix built to
- * B-DNA's own numbers. Working units below are *badge half-heights*: the badge
- * is 2 units tall and 2 wide, which is the same convention `SpinningBadge`
- * uses, so both renderers agree on what "1" means.
+ * The vertical layout winds the twelve cards up a helix built to B-DNA's own
+ * numbers. Working units below are *card half-heights*: the card is 2 units
+ * tall, which is the same convention `SpinningBadge` uses, so both renderers
+ * agree on what "1" means.
  *
  * B-DNA, measured (Watson–Crick / Drew–Dickerson, the canonical fibre and
  * crystal values):
@@ -374,31 +374,23 @@ export const PANEL_BADGE_BACK = '#c2a35c'
  *   helical twist   34.3° per base pair   → 10.5 base pairs per turn
  *   rise             3.32 Å per base pair
  *   radius          10 Å                  → the familiar 20 Å diameter
- *   strand offset  ~120°                  → the major and minor grooves
  *
- * Two of those four are used literally and two are scaled, and it is worth
- * being exact about which. The twist and the strand offset are the *angular*
- * facts about DNA — they are what the shape looks like — and they are used
- * untouched. The rise is scaled, because it has to be: see `HELIX_RISE`.
+ * The twist is the *angular* fact about DNA — it is what the shape looks like —
+ * and it is used untouched. The rise is scaled, because it has to be: see
+ * `HELIX_RISE`.
+ *
+ * A fourth number used to be here: the ~120° between the two backbones, which
+ * is what gives B-DNA its unequal major and minor grooves. It positioned the
+ * second strand, and the strands are no longer drawn — only the cards are, and
+ * the cards only ever rode the first. So this is a single helix now, and that
+ * number went with the geometry it placed.
  */
 
 /** B-DNA's helical twist per base pair, in radians. One badge is one base. */
 export const HELIX_TWIST = (34.3 * Math.PI) / 180
 
-/**
- * The angle between the two backbones, in radians.
- *
- * 120°, and emphatically not 180°. Two strands placed exactly opposite would
- * give a helix with two identical grooves; B-DNA's are famously *unequal* — a
- * wide major groove of about 22 Å and a narrow minor one of about 12 Å — and
- * that asymmetry is a direct consequence of the glycosidic bonds sitting off to
- * one side of the base pair rather than across its diameter. It is also the
- * single detail that makes a drawing read as DNA instead of as two generic
- * intertwined spirals, so it is the last thing that should be rounded off.
- */
-export const HELIX_STRAND_OFFSET = (120 * Math.PI) / 180
 
-/** Distance from the axis to a backbone, in badge half-heights. */
+/** Distance from the axis to a card's centre, in card half-heights. */
 export const HELIX_RADIUS = 2.4
 
 /** B-DNA's own rise-to-radius ratio, 3.32 Å / 10 Å. */
@@ -410,43 +402,64 @@ export const DNA_RISE_RATIO = 3.32 / 10
  * At B-DNA's true proportions a base pair is 3.32 Å thick on a 20 Å diameter —
  * the plates are stacked about six times closer than they are wide, which is
  * exactly why the molecule looks solid rather than like a spiral staircase. Ask
- * twelve badges to stack that way and they overlap by around 60%: a beautiful
- * dense coil in which not one badge is legible.
+ * twelve cards to stack that way and they overlap by around 60%: a beautiful
+ * dense coil in which not one card is legible.
  *
  * So this is the one place the molecule is overruled by the fact that the
- * things on it have to be read. 2.9 puts the rise at 2.31 units against a badge
- * 2 tall, so consecutive badges clear each other with a little air. Everything
- * angular stays real; only the spacing along the axis is stretched, which is
- * the parameter a reader is least able to check by eye and the one the layout
- * most depends on.
+ * things on it have to be read. Everything angular stays real; only the spacing
+ * along the axis is stretched, which is the parameter a reader is least able to
+ * check by eye and the one the layout most depends on.
+ *
+ * How far to stretch it is set by the *focus scale*, and that is easy to get
+ * wrong — it was, at first. Two cards clear each other when the rise exceeds
+ * the sum of their half-heights, and the obvious reading of that is 1 + 1 = 2,
+ * so the rise has to beat 2. But only ever one card is at full size: its
+ * neighbours are at `REST_SCALE`, so the real requirement is 1 + 0.643 = 1.643,
+ * and the worst case is not a focused card at all but the moment mid-scroll
+ * when two cards share the focus at 0.82 each, needing 1.64. The focus scale
+ * buys back the room it appears to need.
+ *
+ * 2.5 puts the rise at 1.99 against that 1.64, so the tightest moment still has
+ * a fifth of a card of air in it — and the helix is a third denser than sizing
+ * it against cards that are never all full size would have made it.
  */
-export const HELIX_RISE_STRETCH = 2.9
+export const HELIX_RISE_STRETCH = 2.5
 export const HELIX_RISE = HELIX_RADIUS * DNA_RISE_RATIO * HELIX_RISE_STRETCH
 
 /**
  * Camera distance and vertical field of view.
  *
  * These two settle a straight conflict, and it is worth naming it rather than
- * pretending the numbers were free. How big the focused badge is goes as
+ * pretending the numbers were free. How big the focused card is goes as
  * `1 / ((D − R) · tan(fov/2))`; how much of the helix is in frame goes as
  * `D · tan(fov/2)`. Both are governed by the same tangent, in opposite
- * directions — a lens tight enough to make the front badge as large as the
- * horizontal rail's 358px leaves 0.96 pitches in frame, which is one badge and
- * two slivers, and at that point the helix has no shape to see.
+ * directions, and their product is fixed by the geometry alone.
  *
- * So the badge gives way, because the structure is the reason this layout
- * exists. At D = 9 and a 40° vertical field the frame holds ±1.42 pitches —
- * the focused badge with a neighbour above and below — and the focused badge
- * lands around 300px in the ~730px the rail area gets on a 1024-tall window.
- * Smaller than the horizontal rail's, and it should be: there, one tile is the
- * whole subject.
+ * That product is what decides this, because the focus scale is only legible if
+ * there is something on screen for the focused card to be larger *than*. The
+ * neighbour is a whole rise away, so it survives only if
+ *
+ *     half-height + REST_SCALE · half-height  ≤  1  ·  (frame half-height)
+ *
+ * which caps the focused card at `1 / (rise + REST_SCALE)` of the frame —
+ * about 38% here, however the lens is set. A tighter lens does not buy a bigger
+ * *comparison*, it just pushes the neighbour off the top: at 40° the card above
+ * spanned 0.65 to 1.16 in clip space, so all anyone ever saw of it was its
+ * bottom edge leaving the frame, and the proportion had nothing to land on.
+ *
+ * At D = 9 and 48° the focused card is 34% of the frame — around 250px in the
+ * ~730px the rail area gets on a 1024-tall window — the card above and below is
+ * whole, and the one beyond that peeks in at the edge, which is what tells you
+ * the helix keeps going. Smaller than the horizontal rail's 517px plate, and it
+ * has to be: there, one tile is the whole subject, and here the relationship
+ * between three of them is.
  *
  * Pulling the camera in to 9 rather than holding it back also widens the
  * near-to-far size ratio across the helix from 1.56 to 1.73, which is free
- * depth — the far badges read as further away rather than merely smaller.
+ * depth — the far cards read as further away rather than merely smaller.
  */
 export const HELIX_CAMERA_DISTANCE = 9
-export const HELIX_FOV = (40 * Math.PI) / 180
+export const HELIX_FOV = (48 * Math.PI) / 180
 
 /** Where on the circle a badge faces the camera. The camera sits on +Z, and a
  *  badge's face normal is its own radial direction, so it looks straight down
@@ -465,23 +478,6 @@ export const HELIX_FRONT_PHASE = Math.PI / 2
 export const HELIX_FOG_NEAR = HELIX_CAMERA_DISTANCE - HELIX_RADIUS
 export const HELIX_FOG_FAR = HELIX_CAMERA_DISTANCE + HELIX_RADIUS * 4.4
 
-/**
- * The backbone and the base-pair rungs: colour, half-width and opacity.
- *
- * The colour is a desaturated version of the gold every badge is rimmed with,
- * so the structure belongs to the things hanging off it.
- *
- * The width is a *half*-width in world units, and world units here are badge
- * half-heights — so it needs converting before it means anything. The focused
- * badge is around 300px tall on a 1024-tall window, which puts one unit at
- * ~150px, which makes this ribbon 2 × 0.022 × 150 ≈ 6.6px at the front of the
- * helix and thinner as it recedes. That is a drawn line; at the 0.055 it
- * started from it was a 16px band competing with the badges.
- */
-export const HELIX_STRAND_COLOR = '#b9ad8e'
-export const HELIX_STRAND_WIDTH = 0.022
-export const HELIX_STRAND_ALPHA = 0.55
-export const HELIX_RUNG_ALPHA = 0.3
 
 /* ---- The card, on the helix ----
  *
@@ -510,6 +506,67 @@ export const HELIX_CARD_ASPECT = FOCUS_W / FOCUS_H
 export const HELIX_TILT_X = (4 * Math.PI) / 180
 export const HELIX_TILT_Y = (6 * Math.PI) / 180
 export const HELIX_LIFT = (6 / FOCUS_H) * 2
+
+/** Design pixels per world unit. The card is `FOCUS_H` tall and 2 units. */
+const PX_PER_UNIT = FOCUS_H / 2
+
+/**
+ * A second, card-local perspective — and the thing that makes the tilt read
+ * like the rail's rather than like a mild lean.
+ *
+ * The rail puts `transformPerspective: 900` on each tile. That is 900px on a
+ * card 517px tall: an eye 1.74 card-heights away, which is very close, and it
+ * is why a 6° yaw there produces a pronounced keystone. The helix's only
+ * perspective is the camera, and the camera sits 6.6 units — 3.3 card-heights —
+ * from the focused card. Twice as far, so half the effect: the near edge of a
+ * tilted card grows 6.0% wider than the far one in the rail, and only 3.1% here.
+ * Geometrically correct, and visibly flatter than the thing it is meant to
+ * match.
+ *
+ * Two perspective divides compose by their reciprocals — `1/d = 1/d₁ + 1/d₂`,
+ * to first order in z — so the local one that brings the pair to the rail's own
+ * 3.48 units is `1 / (1/3.48 − 1/6.6)`. That comes to 7.37 units, and with it
+ * the keystone lands at 1.0595 against the rail's 1.0596.
+ *
+ * It costs nothing at rest: a flat quad has `z = 0` at every vertex, so the
+ * divide is exactly 1 until something tilts the card.
+ */
+export const HELIX_LOCAL_PERSPECTIVE =
+  1 / (PX_PER_UNIT / 900 - 1 / (HELIX_CAMERA_DISTANCE - HELIX_RADIUS))
+
+/**
+ * The boil, in world units, and the rail's own 1.5px.
+ *
+ * The ponpon wobble every tile carries — seeded by index so the rail shakes out
+ * of phase with itself rather than sliding as one block, and damped by focus so
+ * the card being read is the steadiest thing on screen rather than the busiest.
+ * A pixel and a half is nearly invisible on any single frame and unmistakable
+ * in aggregate; past about three it stops reading as alive and starts reading
+ * as broken.
+ */
+export const HELIX_BOIL = 1.5 / PX_PER_UNIT
+
+/**
+ * The lift shadow, from `.card-glow`'s broad `box-shadow` layer:
+ * `0 16px 36px rgba(0,0,0,0.14)`, converted to world units.
+ *
+ * The tight 2px/6px/5% layer underneath it is dropped — at helix scale it lands
+ * inside a single pixel of the card's own edge and contributes nothing but a
+ * draw call.
+ *
+ * Unlike the rail's, this one is a real object: a dark, blurred copy of the
+ * card sitting on a plane just behind it, so it yaws with the card and its
+ * offset foreshortens along with everything else. A screen-aligned drop shadow
+ * on a card at 34° of yaw is the one version that would read as a sticker.
+ */
+export const HELIX_SHADOW_OFFSET = 16 / PX_PER_UNIT
+export const HELIX_SHADOW_BLUR = 36 / PX_PER_UNIT
+export const HELIX_SHADOW_ALPHA = 0.14
+/** How far behind the card the shadow's plane sits. */
+export const HELIX_SHADOW_DEPTH = 0.08
+/** The shadow quad is expanded so the blur has somewhere to fall off inside
+ *  it — the rounded rect stays the card's size, the quad around it grows. */
+export const HELIX_SHADOW_EXPAND = 1.4
 
 /**
  * The ghost name's texture, and why it is taller than the card.

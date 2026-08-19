@@ -992,24 +992,19 @@ export function WritersGarden() {
   const morph = captionMorph(reducedMotion)
 
   return (
-    <div className="font-lausanne flex min-h-svh w-full flex-col items-center overflow-hidden bg-white pt-9 pb-[38px]">
-      {/* Node 317:17934 — the title pill, with the layout toggle beside it.
-          The toggle is not in the design; it is set in the pill's own language
-          — same black, same radius — so it reads as part of the header rather
-          than as a control bolted onto the page. */}
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="flex items-center justify-center gap-3 rounded-xl bg-black py-3 pr-5 pl-3">
-          <img src={iconDotGrid} alt="" className="size-10 shrink-0" />
-          <p className="text-[40px] leading-[1.0008] font-semibold tracking-[-0.8px] whitespace-nowrap text-white">
-            {COPY.title}
-          </p>
-        </div>
-        <LayoutToggle value={layout} onChange={setLayout} />
-      </div>
-
-      {/* Node 318:21420 — the rail. `min-h-0` so the row absorbs the leftover
-          height instead of forcing the page taller than the viewport. */}
-      <div className="flex min-h-0 w-full flex-1 items-center">
+    /* The rail owns the viewport; the header and the caption float over it.
+       Previously all three were rows in a flex column, so the rail only ever
+       got what the other two left — and what they left was the wrong shape for
+       both layouts. The helix wants height above all else, because its whole
+       subject is the cards above and below the focused one. The horizontal rail
+       wants the room to let a focused plate overflow its 332px layout box
+       without being clipped. Splitting the difference between a header, a rail
+       and a caption gave neither.
+       So: `h-svh` exactly, not `min-h-svh` — this is a board, not a document,
+       and it must not be able to grow a scrollbar. */
+    <div className="font-lausanne relative h-svh w-full overflow-hidden bg-white">
+      {/* Node 318:21420 — the rail, now the full viewport. */}
+      <div className="absolute inset-0 flex items-center">
         {vertical ? (
           <VerticalRail
             columnRef={columnRef}
@@ -1031,7 +1026,7 @@ export function WritersGarden() {
           // they measure from the page and the two coordinate spaces differ by
           // wherever the rail happens to sit.
           data-card-rail
-          className="scroll-hidden relative flex h-[730px] w-full cursor-grab touch-pan-y snap-x snap-mandatory select-none items-center overflow-x-auto overflow-y-hidden outline-none"
+          className="scroll-hidden relative flex h-full w-full cursor-grab touch-pan-y snap-x snap-mandatory select-none items-center overflow-x-auto overflow-y-hidden outline-none"
           style={{
             gap: TILE_GAP,
             // Enough lead-in and lead-out that the first and last tiles can
@@ -1157,9 +1152,40 @@ export function WritersGarden() {
         )}
       </div>
 
-      {/* Node 312:3165 — the caption, which is the rail's readout. */}
+      {/* Node 317:17934 — the title pill, with the layout toggle beside it.
+          The toggle is not in the design; it is set in the pill's own language
+          — same black, same radius — so it reads as part of the header rather
+          than as a control bolted onto the page.
+
+          `pointer-events-none` on the bar and `auto` on the toggle: the rail
+          now runs the full height of the viewport, so this sits *on top of* its
+          scroll surface. Left solid it would be a dead strip across the top
+          where the wheel does nothing and a drag cannot start — and the pill is
+          a label, so it has no business swallowing either. Only the control
+          takes the pointer back. */}
+      <div className="pointer-events-none absolute top-9 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3">
+        <div className="flex items-center justify-center gap-3 rounded-xl bg-black py-3 pr-5 pl-3">
+          <img src={iconDotGrid} alt="" className="size-10 shrink-0" />
+          <p className="text-[40px] leading-[1.0008] font-semibold tracking-[-0.8px] whitespace-nowrap text-white">
+            {COPY.title}
+          </p>
+        </div>
+        <div className="pointer-events-auto">
+          <LayoutToggle value={layout} onChange={setLayout} />
+        </div>
+      </div>
+
+      {/* Node 312:3165 — the caption, which is the rail's readout. Floating for
+          the same reason as the header, and transparent to the pointer for the
+          same reason too — this one matters more, because at 482×154 in the
+          middle of the bottom edge it would otherwise be a hole in the helix's
+          scroll surface exactly where a thumb lands. */}
       <div
-        className="w-[482px] max-w-[calc(100%-48px)] shrink-0 overflow-clip p-5"
+        // 62 = the design's 38 off the bottom edge, plus 24 to lift it clear of
+        // it. The board had the caption as the last row of a column, where its
+        // gap came from the page's own bottom padding; floating it took that
+        // away and left it sitting low.
+        className="pointer-events-none absolute bottom-[62px] left-1/2 z-20 w-[482px] max-w-[calc(100%-48px)] -translate-x-1/2 overflow-clip p-5"
         style={{ background: PLATE, borderRadius: 16 }}
       >
         <div className="flex flex-col gap-6">
@@ -1194,7 +1220,10 @@ export function WritersGarden() {
               onClick={() => setPanelOpen((open) => !open)}
               aria-expanded={panelOpen}
               aria-controls={PANEL_ID}
-              className="group relative flex shrink-0 cursor-pointer items-center justify-center gap-1 bg-transparent p-0"
+              // `pointer-events-auto` because the card around it is transparent
+              // to the pointer — see the note there. This is the one thing in
+              // the caption that takes it back.
+              className="group pointer-events-auto relative flex shrink-0 cursor-pointer items-center justify-center gap-1 bg-transparent p-0"
             >
               {/* Both sit above the fill: the fill is later in the DOM, so
                   without a stacking context of their own it would paint over
@@ -1393,10 +1422,10 @@ function VerticalRail({
   onFront: (index: number) => void
 }) {
   return (
-    // `self-stretch` because the row that holds this centres its children, and
-    // the scroller needs the row's full height for its percentage-height
-    // lead-in and lead-out to resolve against something real.
-    <div className="relative min-h-0 w-full self-stretch">
+    // Full height, because the scroller's percentage-height lead-in and
+    // lead-out resolve against it — and because the helix has nothing to show
+    // in a short box: its subject is the cards above and below the focused one.
+    <div className="relative h-full w-full">
       {helix && (
         <BadgeHelix
           badges={BADGES}

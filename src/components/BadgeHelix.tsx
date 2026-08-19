@@ -14,6 +14,7 @@ import {
   GHOST_TEX_SCALE,
   GHOST_TEX_SPAN,
   GHOST_TRACKING,
+  HELIX_BOIL,
   HELIX_CAMERA_DISTANCE,
   HELIX_CARD_ASPECT,
   HELIX_FOG_FAR,
@@ -21,14 +22,15 @@ import {
   HELIX_FOV,
   HELIX_FRONT_PHASE,
   HELIX_LIFT,
+  HELIX_LOCAL_PERSPECTIVE,
   HELIX_OMEGA,
   HELIX_RADIUS,
   HELIX_RISE,
-  HELIX_RUNG_ALPHA,
-  HELIX_STRAND_ALPHA,
-  HELIX_STRAND_COLOR,
-  HELIX_STRAND_OFFSET,
-  HELIX_STRAND_WIDTH,
+  HELIX_SHADOW_ALPHA,
+  HELIX_SHADOW_BLUR,
+  HELIX_SHADOW_DEPTH,
+  HELIX_SHADOW_EXPAND,
+  HELIX_SHADOW_OFFSET,
   HELIX_TILT_X,
   HELIX_TILT_Y,
   HELIX_TWIST,
@@ -39,16 +41,22 @@ import {
   TILE_RADIUS,
 } from '../lib/writersGarden'
 import { springStep, type SpringState } from '../lib/spring'
-import { getTier, smoothstep } from '../lib/ponpon'
+import { boilOffset, getTier, smoothstep } from '../lib/ponpon'
 
 /**
- * The badges wound up a double helix, for the vertical layout.
+ * The badges wound up a helix, for the vertical layout.
  *
- * Twelve badges are twelve bases on one strand of B-DNA, at the molecule's own
- * 34.3° of twist each; the second strand runs 120° behind, and rungs cross the
- * interior between them. The geometry and the reasoning behind which of DNA's
+ * Twelve cards are twelve bases on one strand of B-DNA, at the molecule's own
+ * 34.3° of twist each. The geometry and the reasoning behind which of DNA's
  * numbers are used literally live in `lib/writersGarden.ts` — this file is the
  * renderer.
+ *
+ * The backbones and the base-pair rungs used to be drawn here too, and are not
+ * any more: the path is left to be inferred from where the cards are, which is
+ * the reading with nothing between the viewer and the twelve things that
+ * matter. It also costs the second strand, since the cards only ever rode the
+ * first — so this is now a single helix rather than a double one, and the 120°
+ * groove offset that made it read as DNA went with the geometry it positioned.
  *
  * What rides the helix is the *whole card*, not a badge on its own: the #fafafa
  * plate at 498×517 with 28px corners, the ghost name rising behind it, the
@@ -72,11 +80,11 @@ import { getTier, smoothstep } from '../lib/ponpon'
  * Transparency is painter's algorithm rather than a depth buffer. The plate is
  * opaque, but its rounded corners are not, and depth-testing a soft edge needs
  * either back-to-front order or a cutout that would chew the corners off. So the
- * twelve cards are sorted by view distance each frame — twelve items, nothing —
- * and the strands are drawn first and therefore always behind. That last part is
- * a real simplification: a strand passing in front of the helix ought to cross
- * over a card on the far side, and here it does not. Hairlines at 55% alpha
- * against the cards being read is a trade worth taking.
+ * twelve cards are sorted by view distance each frame — twelve items, an
+ * insertion sort, nothing. With the strands gone that ordering is now the whole
+ * of the depth story, and it is exact: the cards are well separated along the
+ * helix and never interpenetrate, which is the one case per-quad sorting cannot
+ * resolve.
  */
 
 /** Fewer texels on weak hardware. */
@@ -110,6 +118,8 @@ uniform float uPhase;
 uniform float uIndex;
 uniform float uScale;
 uniform vec3  uTilt;
+uniform vec2  uBoil;
+uniform float uShadow;
 uniform vec3  uCamera;
 uniform mat4  uProj;
 
@@ -139,18 +149,29 @@ void main() {
   vec3 right = vec3(sin(phase), 0.0, -cos(phase));
   vec3 up = vec3(0.0, 1.0, 0.0);
 
-  /* The focus scale — the rail's REST_SCALE..1, about the card's own centre.
-     Perspective is already making the near cards bigger; this is the *other*
-     thing the rail does, and it is a different statement: depth says how far
-     away a card is, focus says which one is being read. */
-  vec3 local = vec3(aCorner.x * ${HELIX_CARD_ASPECT.toFixed(6)}, aCorner.y, 0.0) * uScale;
+  /* The card, in its own plane, at the focus scale — the rail's REST_SCALE..1,
+     about its own centre. Perspective is already making the near cards bigger;
+     this is the *other* thing the rail does, and it is a different statement:
+     depth says how far away a card is, focus says which one is being read.
+
+     The shadow pass draws the same card expanded, so its blur has somewhere to
+     fall off inside the quad, offset down its own face and pushed onto a plane
+     behind it. That last part is what makes it a shadow rather than a sticker:
+     it yaws with the card, so the offset foreshortens along with everything
+     else. */
+  float grow = uShadow > 0.0 ? ${HELIX_SHADOW_EXPAND.toFixed(4)} : 1.0;
+  vec3 local = vec3(aCorner.x * ${HELIX_CARD_ASPECT.toFixed(6)}, aCorner.y, 0.0) * uScale * grow;
+  if (uShadow > 0.0) {
+    local.y -= ${HELIX_SHADOW_OFFSET.toFixed(6)} * uShadow;
+    local.z -= ${HELIX_SHADOW_DEPTH.toFixed(4)};
+  }
   vec3 n = vec3(0.0, 0.0, 1.0);
 
   /* The hover tilt, about the card's own axes and in the rail's order — GSAP
      writes rotationY then rotationX onto the tile, and a rotation pair does not
      commute, so the order is part of the look rather than an implementation
-     detail. There is no transformPerspective to match: the camera supplies the
-     projection that the rail has to fake per-tile. */
+     detail. The rail's transformPerspective is matched just below, because the
+     camera on its own does not supply enough of it. */
   float cy = cos(uTilt.y);
   float sy = sin(uTilt.y);
   local = vec3(local.x * cy + local.z * sy, local.y, -local.x * sy + local.z * cy);
@@ -160,6 +181,20 @@ void main() {
   float sx = sin(uTilt.x);
   local = vec3(local.x, local.y * cx - local.z * sx, local.y * sx + local.z * cx);
   n = vec3(n.x, n.y * cx - n.z * sx, n.y * sx + n.z * cx);
+
+  /* The card's own perspective, on top of the camera's — the rail's
+     transformPerspective: 900, which is an eye far closer than this camera and
+     is why a tilt there keystones twice as hard as one here. See
+     HELIX_LOCAL_PERSPECTIVE for the composition. Exactly 1 at rest, because a
+     flat quad has z = 0 at every vertex. */
+  float persp = ${HELIX_LOCAL_PERSPECTIVE.toFixed(5)}
+    / max(${HELIX_LOCAL_PERSPECTIVE.toFixed(5)} - local.z, 0.001);
+  local.xy *= persp;
+
+  /* The boil. Applied in the card's own plane rather than in screen space, so
+     it wobbles with the surface instead of sliding across it — seeded by index
+     so no two cards shake together. */
+  local.xy += uBoil;
 
   vec3 world = centre + right * local.x + up * local.y + normal * local.z;
   vec3 view = world - uCamera;
@@ -187,6 +222,7 @@ uniform vec3  uPlate;
 uniform vec3  uFogColor;
 uniform float uFocus;
 uniform float uShimmer;
+uniform float uShadow;
 /** xy: pointer in card uv. z: strength. w: the hover edge and shadow weight. */
 uniform vec4  uGlow;
 
@@ -214,9 +250,26 @@ void main() {
      the one part of the card that never needed a raster: it is 28px corners on
      a flat fill, and an SDF gives that at any size with no texels to minify.
      Distances are in the design's own pixels. */
-  vec2 p = (uv - 0.5) * vec2(${FOCUS_W.toFixed(1)}, ${FOCUS_H.toFixed(1)});
+  /* On the shadow pass the quad was grown by HELIX_SHADOW_EXPAND, so the uv
+     span covers more than the card — undoing that here keeps the rounded rect
+     the card's own size with clear margin around it for the blur. */
+  float grow = uShadow > 0.0 ? ${HELIX_SHADOW_EXPAND.toFixed(4)} : 1.0;
+  vec2 p = (uv - 0.5) * vec2(${FOCUS_W.toFixed(1)}, ${FOCUS_H.toFixed(1)}) * grow;
   vec2 q = abs(p) - vec2(${(FOCUS_W / 2).toFixed(1)}, ${(FOCUS_H / 2).toFixed(1)}) + ${TILE_RADIUS.toFixed(1)};
   float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - ${TILE_RADIUS.toFixed(1)};
+
+  if (uShadow > 0.0) {
+    /* A blurred silhouette, and nothing else — no plate, no art, no lighting.
+       The ramp stands in for the gaussian a CSS box-shadow would run: over a
+       spread this wide the difference between the two is not something anyone
+       can point at, and it costs one smoothstep instead of a blur pass. */
+    float s = 1.0 - smoothstep(-${(HELIX_SHADOW_BLUR * (FOCUS_H / 2)).toFixed(1)}, ${(HELIX_SHADOW_BLUR * (FOCUS_H / 2)).toFixed(1)}, d);
+    float a = s * ${HELIX_SHADOW_ALPHA.toFixed(3)} * uShadow * (1.0 - vFog);
+    // Premultiplied, and black, so the colour is simply zero.
+    gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+    return;
+  }
+
   // 2 design-pixels of feather. The card is drawn at roughly 0.6 of design size
   // at the front of the helix, so this lands near one screen pixel there.
   float plate = 1.0 - smoothstep(-1.0, 1.0, d);
@@ -309,88 +362,6 @@ void main() {
   col = mix(col, uFogColor, vFog);
 
   gl_FragColor = vec4(col * plate, plate);
-}
-`
-
-/**
- * One program draws both backbones and every rung, because they are the same
- * curve read two ways.
- *
- * Every vertex carries (t, u, side, along). `t` is the base-pair index and `u`
- * picks the strand — 0 and 1 are the two backbones, and a vertex sweeping `u`
- * from 0 to 1 at fixed `t` traces a rung straight across the interior. So a
- * backbone is "hold u, vary t" and a rung is "hold t, vary u", out of one
- * attribute layout and one draw path.
- *
- * `along` says which of those two a vertex belongs to, because the ribbon has
- * to be widened perpendicular to whichever way it is travelling. The width is
- * taken across the direction of travel *and* the direction to the camera, so
- * the ribbon always presents its face — a strand widened in a fixed world
- * direction would vanish every time the helix carried it edge-on.
- */
-const STRAND_VERTEX = `
-attribute float aT;
-attribute float aU;
-attribute float aSide;
-attribute float aAlong;
-
-uniform float uPhase;
-uniform vec3  uCamera;
-uniform mat4  uProj;
-uniform float uWidth;
-
-varying float vFog;
-
-void main() {
-  float phaseA = uPhase + aT * ${HELIX_TWIST.toFixed(8)};
-  float phaseB = phaseA + ${HELIX_STRAND_OFFSET.toFixed(8)};
-  float y = aT * ${HELIX_RISE.toFixed(6)};
-
-  vec3 pa = vec3(${HELIX_RADIUS.toFixed(4)} * cos(phaseA), y, ${HELIX_RADIUS.toFixed(4)} * sin(phaseA));
-  vec3 pb = vec3(${HELIX_RADIUS.toFixed(4)} * cos(phaseB), y, ${HELIX_RADIUS.toFixed(4)} * sin(phaseB));
-  vec3 pos = mix(pa, pb, aU);
-
-  vec3 dir;
-  if (aAlong < 0.5) {
-    // Along a backbone: the helix tangent, dP/dt, at this vertex's own phase.
-    float ph = phaseA + aU * ${HELIX_STRAND_OFFSET.toFixed(8)};
-    dir = normalize(vec3(
-      -${HELIX_RADIUS.toFixed(4)} * sin(ph) * ${HELIX_TWIST.toFixed(8)},
-      ${HELIX_RISE.toFixed(6)},
-      ${HELIX_RADIUS.toFixed(4)} * cos(ph) * ${HELIX_TWIST.toFixed(8)}
-    ));
-  } else {
-    // Across a rung: the chord between the strands.
-    dir = normalize(pb - pa);
-  }
-
-  vec3 toCam = normalize(uCamera - pos);
-  vec3 side = cross(dir, toCam);
-  // Degenerate exactly when the ribbon points at the camera, where it is a dot
-  // and its width does not matter. Guarded so it is a dot rather than a hole.
-  float len = length(side);
-  pos += (len > 0.0001 ? side / len : vec3(0.0)) * aSide * uWidth;
-
-  vec3 view = pos - uCamera;
-  vFog = smoothstep(${HELIX_FOG_NEAR.toFixed(4)}, ${HELIX_FOG_FAR.toFixed(4)}, length(view));
-
-  gl_Position = uProj * vec4(view, 1.0);
-}
-`
-
-const STRAND_FRAGMENT = `
-precision mediump float;
-
-uniform vec3  uColor;
-uniform vec3  uFogColor;
-uniform float uAlpha;
-
-varying float vFog;
-
-void main() {
-  float alpha = uAlpha * (1.0 - vFog * 0.85);
-  vec3 rgb = mix(uColor, uFogColor, vFog);
-  gl_FragColor = vec4(rgb * alpha, alpha);
 }
 `
 
@@ -538,57 +509,6 @@ function bakeGhost(name: string): HTMLCanvasElement | null {
   return canvas
 }
 
-/**
- * Backbone and rung geometry, in helix parameter space.
- *
- * Built once and never rebuilt: the vertices are (t, u, side, along), and the
- * shape they describe is fixed. Only the *phase* changes as the rail scrolls,
- * and that is a uniform. So the whole molecule is two static buffers.
- */
-function buildStrands(count: number) {
-  const backbone: number[] = []
-  const rungs: number[] = []
-
-  /* Samples per base pair along a backbone. At 34.3° of twist each, a base pair
-     is under a tenth of a turn, so eight segments keep the curve smooth without
-     the vertex count meaning anything. */
-  const SEGMENTS = 8
-  /* Run past each end so the strands leave the frame rather than stopping in
-     mid-air at the first and last card. */
-  const OVERRUN = 1.5
-
-  for (let strand = 0; strand < 2; strand++) {
-    const from = -OVERRUN
-    const to = count - 1 + OVERRUN
-    const steps = Math.ceil((to - from) * SEGMENTS)
-    for (let s = 0; s <= steps; s++) {
-      const t = from + ((to - from) * s) / steps
-      backbone.push(t, strand, -1, 0, t, strand, 1, 0)
-    }
-  }
-
-  // Two triangles per rung: a flat ribbon from strand A across to strand B.
-  const quad: [number, number][] = [
-    [0, -1],
-    [1, -1],
-    [0, 1],
-    [0, 1],
-    [1, -1],
-    [1, 1],
-  ]
-  for (let i = 0; i < count; i++) {
-    for (const [u, side] of quad) rungs.push(i, u, side, 1)
-  }
-
-  return {
-    backbone: new Float32Array(backbone),
-    /** Vertices in ONE strand's strip. */
-    backboneVertices: backbone.length / 4 / 2,
-    rungs: new Float32Array(rungs),
-    rungCount: rungs.length / 4,
-  }
-}
-
 export type BadgeHelixProps = {
   badges: { name: string; art: string }[]
   /**
@@ -652,8 +572,7 @@ export function BadgeHelix({
     }
 
     const cardProgram = link(gl, CARD_VERTEX, CARD_FRAGMENT, 'card')
-    const strandProgram = link(gl, STRAND_VERTEX, STRAND_FRAGMENT, 'strand')
-    if (!cardProgram || !strandProgram) {
+    if (!cardProgram) {
       fail()
       return
     }
@@ -669,15 +588,6 @@ export function BadgeHelix({
       new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
       gl.STATIC_DRAW,
     )
-
-    const strands = buildStrands(count)
-    const backboneBuffer = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, backboneBuffer)
-    gl.bufferData(gl.ARRAY_BUFFER, strands.backbone, gl.STATIC_DRAW)
-
-    const rungBuffer = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, rungBuffer)
-    gl.bufferData(gl.ARRAY_BUFFER, strands.rungs, gl.STATIC_DRAW)
 
     /* ---- Textures ---- */
 
@@ -750,20 +660,14 @@ export function BadgeHelix({
       index: gl.getUniformLocation(cardProgram, 'uIndex'),
       scale: gl.getUniformLocation(cardProgram, 'uScale'),
       tilt: gl.getUniformLocation(cardProgram, 'uTilt'),
+      boil: gl.getUniformLocation(cardProgram, 'uBoil'),
+      shadow: gl.getUniformLocation(cardProgram, 'uShadow'),
       camera: gl.getUniformLocation(cardProgram, 'uCamera'),
       proj: gl.getUniformLocation(cardProgram, 'uProj'),
       focus: gl.getUniformLocation(cardProgram, 'uFocus'),
       shimmer: gl.getUniformLocation(cardProgram, 'uShimmer'),
       glow: gl.getUniformLocation(cardProgram, 'uGlow'),
     }
-    const strandUniforms = {
-      phase: gl.getUniformLocation(strandProgram, 'uPhase'),
-      camera: gl.getUniformLocation(strandProgram, 'uCamera'),
-      proj: gl.getUniformLocation(strandProgram, 'uProj'),
-      width: gl.getUniformLocation(strandProgram, 'uWidth'),
-      alpha: gl.getUniformLocation(strandProgram, 'uAlpha'),
-    }
-
     const fogRgb = toRgb(fog)
 
     gl.useProgram(cardProgram)
@@ -774,19 +678,7 @@ export function BadgeHelix({
     gl.uniform3fv(gl.getUniformLocation(cardProgram, 'uPlate'), toRgb(PLATE))
     gl.uniform3fv(gl.getUniformLocation(cardProgram, 'uFogColor'), fogRgb)
 
-    gl.useProgram(strandProgram)
-    gl.uniform3fv(gl.getUniformLocation(strandProgram, 'uColor'), toRgb(HELIX_STRAND_COLOR))
-    gl.uniform3fv(gl.getUniformLocation(strandProgram, 'uFogColor'), fogRgb)
-    gl.uniform1f(strandUniforms.width, HELIX_STRAND_WIDTH)
-
     const aCorner = gl.getAttribLocation(cardProgram, 'aCorner')
-    const strandAttribs = {
-      t: gl.getAttribLocation(strandProgram, 'aT'),
-      u: gl.getAttribLocation(strandProgram, 'aU'),
-      side: gl.getAttribLocation(strandProgram, 'aSide'),
-      along: gl.getAttribLocation(strandProgram, 'aAlong'),
-    }
-
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     gl.disable(gl.CULL_FACE)
@@ -876,8 +768,6 @@ export function BadgeHelix({
       perspective(proj, HELIX_FOV, aspect, 0.1, 100)
       gl.useProgram(cardProgram)
       gl.uniformMatrix4fv(cardUniforms.proj, false, proj)
-      gl.useProgram(strandProgram)
-      gl.uniformMatrix4fv(strandUniforms.proj, false, proj)
     }
 
     /**
@@ -1011,36 +901,6 @@ export function BadgeHelix({
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)
 
-      /* Strands first, so they sit behind every card. */
-      gl.useProgram(strandProgram)
-      gl.uniform1f(strandUniforms.phase, phase)
-      gl.uniform3f(strandUniforms.camera, 0, camY, HELIX_CAMERA_DISTANCE)
-
-      const bindStrand = () => {
-        gl.vertexAttribPointer(strandAttribs.t, 1, gl.FLOAT, false, 16, 0)
-        gl.vertexAttribPointer(strandAttribs.u, 1, gl.FLOAT, false, 16, 4)
-        gl.vertexAttribPointer(strandAttribs.side, 1, gl.FLOAT, false, 16, 8)
-        gl.vertexAttribPointer(strandAttribs.along, 1, gl.FLOAT, false, 16, 12)
-      }
-      for (const key of ['t', 'u', 'side', 'along'] as const) {
-        gl.enableVertexAttribArray(strandAttribs[key])
-      }
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, backboneBuffer)
-      bindStrand()
-      gl.uniform1f(strandUniforms.alpha, HELIX_STRAND_ALPHA)
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, strands.backboneVertices)
-      gl.drawArrays(gl.TRIANGLE_STRIP, strands.backboneVertices, strands.backboneVertices)
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, rungBuffer)
-      bindStrand()
-      gl.uniform1f(strandUniforms.alpha, HELIX_RUNG_ALPHA)
-      gl.drawArrays(gl.TRIANGLES, 0, strands.rungCount)
-
-      for (const key of ['t', 'u', 'side', 'along'] as const) {
-        gl.disableVertexAttribArray(strandAttribs[key])
-      }
-
       /* Then the cards, far to near. */
       gl.useProgram(cardProgram)
       gl.uniform1f(cardUniforms.phase, phase)
@@ -1059,6 +919,11 @@ export function BadgeHelix({
         gl.uniform1f(cardUniforms.index, i)
         gl.uniform1f(cardUniforms.scale, scales[i])
         gl.uniform1f(cardUniforms.focus, focuses[i])
+
+        /* The boil, damped by focus exactly as the rail damps it: the card
+           being read is the steadiest thing on screen rather than the busiest. */
+        const boil = boilOffset(i, seconds, HELIX_BOIL * (1 - 0.6 * focuses[i]))
+        gl.uniform2f(cardUniforms.boil, boil.x, boil.y)
 
         const hovered = hover.index === i
         gl.uniform3f(
@@ -1085,6 +950,20 @@ export function BadgeHelix({
         const cycle = t - Math.floor(t)
         gl.uniform1f(cardUniforms.shimmer, -1 + 3 * (cycle * cycle * (3 - 2 * cycle)))
 
+        /* A lifted card casts. Drawn immediately before its own card and only
+           for the one being hovered, which is the only one with any lift — the
+           rail's shadow is likewise keyed to `--lift` and so collapses to
+           nothing at rest, which is the design as drawn.
+           It goes first in this pair rather than in the sorted order because it
+           belongs to *this* card: with no depth buffer, "behind" means "drawn
+           just before", and anything further away has already been laid down. */
+        const cast = hovered ? hover.glow : 0
+        if (cast > 0.001) {
+          gl.uniform1f(cardUniforms.shadow, cast)
+          gl.drawArrays(gl.TRIANGLES, 0, 6)
+          gl.uniform1f(cardUniforms.shadow, 0)
+        }
+
         gl.drawArrays(gl.TRIANGLES, 0, 6)
       }
       gl.disableVertexAttribArray(aCorner)
@@ -1105,13 +984,10 @@ export function BadgeHelix({
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerleave', onPointerLeave)
       gl.deleteBuffer(quadBuffer)
-      gl.deleteBuffer(backboneBuffer)
-      gl.deleteBuffer(rungBuffer)
       if (blank) gl.deleteTexture(blank)
       for (const texture of badgeTextures) if (texture) gl.deleteTexture(texture)
       for (const texture of ghostTextures) if (texture) gl.deleteTexture(texture)
       gl.deleteProgram(cardProgram)
-      gl.deleteProgram(strandProgram)
       gl.getExtension('WEBGL_lose_context')?.loseContext()
       canvas.remove()
     }
