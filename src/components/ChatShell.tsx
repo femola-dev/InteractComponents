@@ -67,20 +67,29 @@ export function SectionHeading({ label, action }: { label: string; action?: Reac
   )
 }
 
-/** A white card — the composer's material, reused for every panel a ghost view draws. */
+/**
+ * A white card — the composer's material, reused for every panel a ghost view draws.
+ *
+ * `flat` drops the elevation and keeps only the hairline. A composer floats over
+ * a thread and earns its lift; a page that is panel after panel of placeholder
+ * doesn't — stacked, the same shadow reads as a pile of chrome rather than as
+ * content that hasn't arrived yet.
+ */
 export function Card({
   className = '',
   style,
+  flat = false,
   children,
 }: {
   className?: string
   style?: CSSProperties
+  flat?: boolean
   children?: ReactNode
 }) {
   return (
     <div
       className={`bg-white ${className}`}
-      style={{ boxShadow: `${RING}, ${RAIL_SHADOW}`, ...style }}
+      style={{ boxShadow: flat ? RING : `${RING}, ${RAIL_SHADOW}`, ...style }}
     >
       {children}
     </div>

@@ -74,11 +74,11 @@ const COMPANY_OPTIONS = (Object.entries(COMPANY_NAMES) as [CompanyId, string][])
 
 /* Column widths matching Figma proportions (62/259/294/206/225px at full scale) */
 const COL = {
-  check:  'w-[clamp(40px,5cqw,62px)]',
-  name:   'w-[clamp(150px,17cqw,259px)]',
-  email:  'w-[clamp(170px,19.5cqw,294px)]',
-  tier:   'w-[clamp(90px,11.5cqw,206px)]',
-  company:'w-[clamp(121px,13.9cqw,225px)]',
+  check: 'w-[clamp(40px,5cqw,62px)]',
+  name: 'w-[clamp(150px,17cqw,259px)]',
+  email: 'w-[clamp(170px,19.5cqw,294px)]',
+  tier: 'w-[clamp(90px,11.5cqw,206px)]',
+  company: 'w-[clamp(121px,13.9cqw,225px)]',
 } as const
 
 function WorkspaceInitial({ workspace, className }: { workspace: (typeof WORKSPACES)[number]; className?: string }) {
@@ -632,9 +632,8 @@ export function MembershipDashboard() {
                         key={w.name}
                         type="button"
                         onClick={() => { setWorkspace(w); setWorkspaceOpen(false) }}
-                        className={`flex w-full cursor-pointer items-center gap-[6px] px-[10px] py-[6px] text-[clamp(11px,1.2cqw,13px)] text-left transition-colors duration-100 ${
-                          w.name === workspace.name ? 'text-white bg-white/10' : 'text-[#939e95] hover:bg-white/5 hover:text-white'
-                        }`}
+                        className={`flex w-full cursor-pointer items-center gap-[6px] px-[10px] py-[6px] text-[clamp(11px,1.2cqw,13px)] text-left transition-colors duration-100 ${w.name === workspace.name ? 'text-white bg-white/10' : 'text-[#939e95] hover:bg-white/5 hover:text-white'
+                          }`}
                         style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1' }}
                       >
                         <WorkspaceInitial workspace={w} className="size-[clamp(11px,1.3cqw,14px)]" />

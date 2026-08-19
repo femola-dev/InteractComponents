@@ -389,7 +389,7 @@ function JobsBody() {
       </motion.div>
 
       <motion.div variants={fadeBlurIn}>
-        <Card className="overflow-hidden rounded-[16px]">
+        <Card flat className="overflow-hidden rounded-[16px]">
           <div className="flex h-9 items-center gap-3 px-4">
             <Ghost className="h-2 w-[88px] rounded-full" />
             <div className="flex-1" />
@@ -468,7 +468,7 @@ function ChartBody() {
     <motion.div {...BODY_STAGGER} className="flex h-full w-full flex-col gap-4 py-6">
       <motion.div variants={fadeBlurIn} className="flex shrink-0 gap-4">
         {[0, 1, 2].map(i => (
-          <Card key={i} className="flex flex-1 flex-col gap-3 rounded-[14px] p-4">
+          <Card key={i} flat className="flex flex-1 flex-col gap-3 rounded-[14px] p-4">
             <Ghost className="h-2 w-[72px] rounded-full" />
             <Ghost className="h-5 w-[112px] rounded-[6px]" deep />
             <Ghost className="h-4 w-[52px] rounded-full" />
@@ -479,7 +479,7 @@ function ChartBody() {
       {/* Takes the slack, so the frame ends on the same 24px bottom gutter it
           started on rather than leaving a band of empty canvas. */}
       <motion.div variants={fadeBlurIn} className="min-h-0 flex-1">
-        <Card className="flex h-full flex-col gap-5 rounded-[16px] p-5">
+        <Card flat className="flex h-full flex-col gap-5 rounded-[16px] p-5">
           <div className="flex shrink-0 items-center gap-4">
             <Ghost className="h-[10px] w-[128px] rounded-full" />
             <div className="flex-1" />
@@ -533,7 +533,7 @@ function ChartBody() {
       </motion.div>
 
       <motion.div variants={fadeBlurIn} className="flex h-[164px] shrink-0 gap-4">
-        <Card className="flex w-[340px] shrink-0 items-center gap-5 rounded-[16px] p-5">
+        <Card flat className="flex w-[340px] shrink-0 items-center gap-5 rounded-[16px] p-5">
           {/* A donut: a filled disc with the card's own white punched out of it. */}
           <div className="relative size-24 shrink-0">
             <Ghost className="absolute inset-0 rounded-full" deep />
@@ -549,7 +549,7 @@ function ChartBody() {
           </div>
         </Card>
 
-        <Card className="flex flex-1 flex-col justify-center gap-3.5 rounded-[16px] p-5">
+        <Card flat className="flex flex-1 flex-col justify-center gap-3.5 rounded-[16px] p-5">
           {SHARES.map((share, i) => (
             <div key={i} className="flex items-center gap-3">
               <Ghost className="h-2 w-[72px] shrink-0 rounded-full" />
@@ -607,7 +607,7 @@ function SettingsBody() {
   return (
     <motion.div {...BODY_STAGGER} className="flex w-full flex-col gap-4 py-6">
       <motion.div variants={fadeBlurIn}>
-        <Card className="flex items-center gap-4 rounded-[16px] p-4">
+        <Card flat className="flex items-center gap-4 rounded-[16px] p-4">
           <Ghost className="size-14 shrink-0 rounded-full" deep />
           <div className="flex flex-col gap-2">
             <Ghost className="h-[10px] w-[148px] rounded-full" />
@@ -621,7 +621,7 @@ function SettingsBody() {
       {SETTINGS_GROUPS.map(group => (
         <motion.div key={group.heading} variants={fadeBlurIn} className="flex flex-col gap-2">
           <SectionHeading label={group.heading} />
-          <Card className="overflow-hidden rounded-[16px]">
+          <Card flat className="overflow-hidden rounded-[16px]">
             {group.rows.map((control, i) => {
               row += 1
               return (

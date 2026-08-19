@@ -198,10 +198,10 @@ export function Portfolio() {
             onBack={() => sweep(() => setView('performance'), { direction: 'ttb' })}
           />
         ) : (
-        <PortfolioSheet {...rise(0.05)}>
-          {/* Header — title left, controls right. z-20 keeps the open
+          <PortfolioSheet {...rise(0.05)}>
+            {/* Header — title left, controls right. z-20 keeps the open
               currency menu above the chart that follows in the document. */}
-          <div className="relative z-20 flex items-start justify-between gap-6">
+            <div className="relative z-20 flex items-start justify-between gap-6">
               <motion.div {...rise(0.12)} className="flex flex-col gap-3">
                 <h1 className="text-stat text-[18px] leading-[22px] tracking-[-0.36px]">
                   Portfolio Performance
@@ -276,9 +276,8 @@ export function Portfolio() {
                       role="tab"
                       aria-selected={r === range}
                       onClick={() => setRange(r)}
-                      className={`trim-cap cursor-pointer text-[12px] leading-[22px] tracking-[-0.24px] outline-none focus-visible:underline ${
-                        r === range ? 'text-ink' : 'text-stat-dim'
-                      }`}
+                      className={`trim-cap cursor-pointer text-[12px] leading-[22px] tracking-[-0.24px] outline-none focus-visible:underline ${r === range ? 'text-ink' : 'text-stat-dim'
+                        }`}
                       whileHover={{ scale: 1.08 }}
                       whileTap={{ scale: 0.96 }}
                       transition={springResponsive}
@@ -290,7 +289,7 @@ export function Portfolio() {
               </motion.div>
             </div>
 
-          {/* Plot — dither-kit's canvas renderer, replacing the flat Figma
+            {/* Plot — dither-kit's canvas renderer, replacing the flat Figma
               export, so the range tabs actually redraw the curve. This is the
               sheet's elastic block: everything else is type at a fixed size, so
               the plot is what yields when the frame is short.
@@ -298,129 +297,129 @@ export function Portfolio() {
               The draw-on animation replays off the identity of `data`, which
               only changes when the range does — no `replayToken` needed, and
               scrubbing leaves the curve alone. */}
-          <motion.div
-            {...rise(0.24)}
-            className="relative z-0 mt-[68px] h-[clamp(180px,30vh,348px)] w-full overflow-hidden rounded-t-[32px]"
-          >
-            <AreaChart
-              data={data}
-              config={chartConfig}
-              bloom="low"
-              // Past the scrub point the fill drops to #BEBEBE — the sheet's
-              // own muted grey — while the trend line stays whole.
-              trailColor="mute"
-              margins={CHART_MARGINS}
-              className="size-full"
-              // The empty wedge above the curve is sheet, not chart: the
-              // pointer crossing it on its way to the Insight key below must
-              // leave the plot alone. See the prop's note in cartesian-root.
-              hoverArea="under-series"
-              onHoverChange={setHoverIndex}
+            <motion.div
+              {...rise(0.24)}
+              className="relative z-0 mt-[68px] h-[clamp(180px,30vh,348px)] w-full overflow-hidden rounded-t-[32px]"
             >
-              {/* `hatched` rather than `gradient`: the Figma plot fills its
+              <AreaChart
+                data={data}
+                config={chartConfig}
+                bloom="low"
+                // Past the scrub point the fill drops to #BEBEBE — the sheet's
+                // own muted grey — while the trend line stays whole.
+                trailColor="mute"
+                margins={CHART_MARGINS}
+                className="size-full"
+                // The empty wedge above the curve is sheet, not chart: the
+                // pointer crossing it on its way to the Insight key below must
+                // leave the plot alone. See the prop's note in cartesian-root.
+                hoverArea="under-series"
+                onHoverChange={setHoverIndex}
+              >
+                {/* `hatched` rather than `gradient`: the Figma plot fills its
                   region with diagonal hatching, and a solid dither fill swamps
                   a sheet that is otherwise white. */}
-              <Area dataKey="value" variant="hatched" />
-              {/* No <Tooltip>: the sheet's own headline is the readout now, and
+                <Area dataKey="value" variant="hatched" />
+                {/* No <Tooltip>: the sheet's own headline is the readout now, and
                   a floating card on top of it would say the same thing twice. */}
-            </AreaChart>
-          </motion.div>
+              </AreaChart>
+            </motion.div>
 
-          {/* Kept from the design rather than dither-kit's <XAxis />, whose ticks
+            {/* Kept from the design rather than dither-kit's <XAxis />, whose ticks
               are mono 10px — these are the sheet's Open Runde 12px. Inset to the
               plot's width (588 of 668), as in Figma. */}
-          <motion.div
-            {...rise(0.3)}
-            className="text-stat-dim mx-auto mt-4 flex w-[88%] items-center justify-between text-[12px] leading-[22px] tracking-[-0.24px]"
-          >
-            {ticks.map((point, i) => (
-              <span key={`${point.date}-${i}`}>{tickLabel(point.date)}</span>
-            ))}
-          </motion.div>
+            <motion.div
+              {...rise(0.3)}
+              className="text-stat-dim mx-auto mt-4 flex w-[88%] items-center justify-between text-[12px] leading-[22px] tracking-[-0.24px]"
+            >
+              {ticks.map((point, i) => (
+                <span key={`${point.date}-${i}`}>{tickLabel(point.date)}</span>
+              ))}
+            </motion.div>
 
-          <motion.div
-            {...rise(0.36)}
-            className="relative mx-auto mt-7 w-full max-w-[526px]"
-          >
-            {/* 106px with the copy starting at 19.5: the panel is shorter than
+            <motion.div
+              {...rise(0.36)}
+              className="relative mx-auto mt-7 w-full max-w-[526px]"
+            >
+              {/* 106px with the copy starting at 19.5: the panel is shorter than
                 the text it holds, and the blur is what resolves that — the last
                 lines fade rather than being clipped. 19.5px side padding leaves
                 the copy the design's 487px measure inside 526. */}
-            <div className="bg-panel border-panel-edge relative h-[106px] overflow-hidden rounded-[16px] border-[0.5px] px-[19.5px] pt-5">
-              <p className="text-stat text-[14px] leading-[22px] tracking-[-0.28px]">
-                {insight}
-              </p>
+              <div className="bg-panel border-panel-edge relative h-[106px] overflow-hidden rounded-[16px] border-[0.5px] px-[19.5px] pt-5">
+                <p className="text-stat text-[14px] leading-[22px] tracking-[-0.28px]">
+                  {insight}
+                </p>
 
-              {/* Figma's "Progressive Blur" layer — 526×70, flush to both sides
+                {/* Figma's "Progressive Blur" layer — 526×70, flush to both sides
                   and pinned to the bottom edge of the 106px panel. */}
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[70px] overflow-hidden rounded-t-[20px]">
-                <ProgressiveBlur />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[70px] overflow-hidden rounded-t-[20px]">
+                  <ProgressiveBlur />
+                </div>
               </div>
-            </div>
 
-            {/* Overlaps the panel's bottom edge by 15px, as in the design. */}
-            <motion.button
-              type="button"
-              // Shimmer bottom-to-top into the insights view — the sheet swaps
-              // underneath the band at its midpoint, same as ArticleReader's
-              // article/summary toggle.
-              onClick={() => sweep(() => setView('insights'), { direction: 'btt' })}
-              ref={key.ref}
-              // Node 153:2612 — 156×42, content row 16px at 16/13 inset, and a
-              // 12px radius at 60% corner smoothing. `z-20` puts the key above
-              // the blur where the two overlap, as the design layers them.
-              //
-              // The fill and the 2px stroke are the SVG below, not `bg-*` and
-              // `border-2`, because no CSS property draws Figma's smoothing
-              // (see src/lib/squircle.ts). That makes the padding the node's
-              // own 16/13 rather than the 14/11 a CSS border needed — the
-              // stroke is inside the box now, as it is in Figma, so it no
-              // longer has to be paid for out of the padding. Same 42px box:
-              // 13 + 16 + 13.
-              //
-              // `rounded-[12px]` stays for the focus ring, which is a
-              // box-shadow on the border box and can't follow the path.
-              className="text-insight-ink absolute -bottom-[27px] left-1/2 z-20 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-[12px] px-4 py-[13px] text-[14px] leading-[22px] tracking-[-0.28px] outline-none focus-visible:ring-2 focus-visible:ring-insight-edge/40"
-              // `initial={false}`: the sheet's own entrance already brings the
-              // key in — this would otherwise animate the lip from nothing.
-              initial={false}
-              animate={KEY.rest}
-              whileHover={KEY.hover}
-              whileFocus={KEY.hover}
-              whileTap={KEY.press}
-              transition={reducedMotion ? { duration: 0 } : transitionFast}
-            >
-              {/* The key's face. Absolute over the whole box, so it is the
+              {/* Overlaps the panel's bottom edge by 15px, as in the design. */}
+              <motion.button
+                type="button"
+                // Shimmer bottom-to-top into the insights view — the sheet swaps
+                // underneath the band at its midpoint, same as ArticleReader's
+                // article/summary toggle.
+                onClick={() => sweep(() => setView('insights'), { direction: 'btt' })}
+                ref={key.ref}
+                // Node 153:2612 — 156×42, content row 16px at 16/13 inset, and a
+                // 12px radius at 60% corner smoothing. `z-20` puts the key above
+                // the blur where the two overlap, as the design layers them.
+                //
+                // The fill and the 2px stroke are the SVG below, not `bg-*` and
+                // `border-2`, because no CSS property draws Figma's smoothing
+                // (see src/lib/squircle.ts). That makes the padding the node's
+                // own 16/13 rather than the 14/11 a CSS border needed — the
+                // stroke is inside the box now, as it is in Figma, so it no
+                // longer has to be paid for out of the padding. Same 42px box:
+                // 13 + 16 + 13.
+                //
+                // `rounded-[12px]` stays for the focus ring, which is a
+                // box-shadow on the border box and can't follow the path.
+                className="text-insight-ink absolute -bottom-[27px] left-1/2 z-20 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-[12px] px-4 py-[13px] text-[14px] leading-[22px] tracking-[-0.28px] outline-none focus-visible:ring-2 focus-visible:ring-insight-edge/40"
+                // `initial={false}`: the sheet's own entrance already brings the
+                // key in — this would otherwise animate the lip from nothing.
+                initial={false}
+                animate={KEY.rest}
+                whileHover={KEY.hover}
+                whileFocus={KEY.hover}
+                whileTap={KEY.press}
+                transition={reducedMotion ? { duration: 0 } : transitionFast}
+              >
+                {/* The key's face. Absolute over the whole box, so it is the
                   first thing painted and the label sits on top of it — and so
                   the `drop-shadow` lip, which traces rendered alpha rather
                   than the border box, picks up the smoothed corners for free.
                   `overflow-visible` because the stroke is centred on a path
                   inset by half its width, not clipped to the viewBox. */}
-              {key.d && (
-                <svg
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 size-full overflow-visible"
-                >
-                  <path
-                    d={key.d}
-                    transform={`translate(${key.inset} ${key.inset})`}
-                    fill="var(--color-insight)"
-                    stroke="var(--color-insight-ink)"
-                    strokeWidth={key.inset * 2}
-                  />
-                </svg>
-              )}
+                {key.d && (
+                  <svg
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 size-full overflow-visible"
+                  >
+                    <path
+                      d={key.d}
+                      transform={`translate(${key.inset} ${key.inset})`}
+                      fill="var(--color-insight)"
+                      stroke="var(--color-insight-ink)"
+                      strokeWidth={key.inset * 2}
+                    />
+                  </svg>
+                )}
 
-              {/* 16px tall — the icon sets the row's height, since the trimmed
+                {/* 16px tall — the icon sets the row's height, since the trimmed
                   label is only its 10px cap height. No line box of its own.
                   `relative` lifts it clear of the face painted above. */}
-              <span className="relative flex items-center gap-1">
-                <img src={iconScriptAi} alt="" aria-hidden="true" className="size-4" />
-                <span className="trim-cap">Portfolio Insight</span>
-              </span>
-            </motion.button>
-          </motion.div>
-        </PortfolioSheet>
+                <span className="relative flex items-center gap-1">
+                  <img src={iconScriptAi} alt="" aria-hidden="true" className="size-4" />
+                  <span className="trim-cap">Portfolio Insight</span>
+                </span>
+              </motion.button>
+            </motion.div>
+          </PortfolioSheet>
         )}
       </div>
     </DeviceFrame>

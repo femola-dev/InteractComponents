@@ -161,11 +161,16 @@
      the pane, as the only flexible element, absorbs the entire loss when the
      viewport gets short (browser zoom, small laptops). These hold the exact
      Figma value at the design's height and only yield below it. */
-  --spacing-frame-top: clamp(16px, 5vh, 40px); /* Figma 40 */
-  --spacing-band-gap: clamp(12px, 4.75vh, 38px); /* Figma 38 */
-  --spacing-read-top: clamp(16px, 6vh, 48px); /* Figma 48 */
-  --spacing-read-bottom: clamp(64px, 14vh, 112px); /* Figma 112 */
-  --spacing-read-gap: clamp(20px, 5vh, 40px); /* Figma 40 */
+  --spacing-frame-top: clamp(16px, 5vh, 40px);
+  /* Figma 40 */
+  --spacing-band-gap: clamp(12px, 4.75vh, 38px);
+  /* Figma 38 */
+  --spacing-read-top: clamp(16px, 6vh, 48px);
+  /* Figma 48 */
+  --spacing-read-bottom: clamp(64px, 14vh, 112px);
+  /* Figma 112 */
+  --spacing-read-gap: clamp(20px, 5vh, 40px);
+  /* Figma 40 */
 
   /* Corner radius */
   --radius-sm: 6px;
@@ -242,14 +247,17 @@
      poster reads as absence rather than as a choice. Nudging them onto a warm
      axis costs nothing in contrast and gives the coloured glyphs a ground that
      belongs to the same world they do. */
-  --color-tray: #f7f4ef; /* placeholder panels, and the ticket's darken layer */
-  --color-chip: #e8e3da; /* meta pills and the connectors between them */
+  --color-tray: #f7f4ef;
+  /* placeholder panels, and the ticket's darken layer */
+  --color-chip: #e8e3da;
+  /* meta pills and the connectors between them */
   /* The tray's Shuffle key — the one solid fill in it, and the one surface here
      left at the design's own neutral grey. The warm cast the others take reads
      as a tint on a large frosted pane; on a 95px opaque capsule sitting under
      seven fluorescent tiles it just looked like a stain. */
   --color-key: #d9d9d9;
-  --color-edge: #ece7df; /* device outline and home indicator */
+  --color-edge: #ece7df;
+  /* device outline and home indicator */
   /* Copy on those surfaces. Warm near-black rather than #000, and a warm grey
      for the year chip's resting label. Separate tokens and not a change to
      `--color-ink`, which the article and Portfolio sheets share. */
@@ -289,6 +297,7 @@ body {
 .scroll-hidden {
   scrollbar-width: none;
 }
+
 .scroll-hidden::-webkit-scrollbar {
   display: none;
 }
@@ -351,23 +360,24 @@ body {
   from {
     background-position: 0 0;
   }
+
   to {
     background-position: 9px 9px;
   }
 }
+
 .row-hatch:hover,
 .row-hatch[data-active='true'] {
-  background-image: repeating-linear-gradient(
-    135deg,
-    var(--row-hatch-color) 0px,
-    var(--row-hatch-color) 3px,
-    transparent 3px,
-    transparent 9px
-  );
+  background-image: repeating-linear-gradient(135deg,
+      var(--row-hatch-color) 0px,
+      var(--row-hatch-color) 3px,
+      transparent 3px,
+      transparent 9px);
   animation: row-hatch-shift 1.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {
@@ -489,13 +499,123 @@ body {
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Writers Garden badge shimmer — a diagonal light sweep that glides
+   continuously across each badge tile. GPU-composited: the gradient
+   is a fixed-size pseudo-element translated by `transform`, so it
+   never triggers layout or repaint on the badge beneath it. */
+@keyframes badge-shimmer {
+  0% {
+    transform: translateX(-100%) skewX(-20deg);
+  }
+
+  100% {
+    transform: translateX(200%) skewX(-20deg);
+  }
+}
+
+.badge-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.badge-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0) 25%,
+      rgba(255, 255, 255, 0.35) 50%,
+      rgba(255, 255, 255, 0) 75%,
+      transparent 100%);
+  animation: badge-shimmer 1.5s ease-in-out infinite;
+  /* Stagger each tile so they don't all flash at once. */
+  animation-delay: var(--shimmer-delay, 0s);
+  border-radius: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-shimmer::after {
+    animation: none;
+  }
+}
+
+/* Writers Garden pointer highlight — a soft vignette pinned to the cursor,
+   so the point under the pointer is the brightest part of the plate. The
+   plate is #fafafa, so a white highlight would be invisible; darkening
+   everything *except* the pointer is the only version that reads on a light
+   surface. GSAP writes the two coordinates as unitless 0-100 numbers —
+   custom properties give it no unit to mis-infer — and fades `--glow` in and
+   out on enter/leave. */
+.card-glow {
+  /* Declared, not merely defaulted in the `var()` fallbacks below. GSAP reads
+     the current value off the computed style before it tweens, and an
+     *undeclared* custom property computes to the empty string — which it
+     cannot parse as a number, so every tween would start from 0 rather than
+     from centre/rest. The fallbacks stay for the no-JS case. */
+  --pointer-x: 50;
+  --pointer-y: 50;
+  --glow: 0;
+  --lift: 0;
+  --edge: 0;
+
+  /* Depth and edge, both keyed to `--lift`/`--edge` so every term collapses to
+     exactly zero at rest — an un-hovered plate carries no shadow and no border
+     at all, which is the design as drawn. Two shadows because one cannot be
+     both the contact shadow and the cast one. GSAP raises these on enter and
+     drops them on leave and *only* then: they are paint, not transform, so
+     they are deliberately never touched on pointer move. */
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, calc(var(--edge) * 0.09)),
+    0 calc(var(--lift) * 2px) calc(var(--lift) * 6px) rgba(0, 0, 0, calc(var(--lift) * 0.05)),
+    0 calc(var(--lift) * 16px) calc(var(--lift) * 36px) rgba(0, 0, 0, calc(var(--lift) * 0.14));
+}
+
+.card-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: var(--glow, 0);
+  /* A lit spot under the pointer falling away to a darkened rim. On a #fafafa
+     plate a pure-white highlight has almost nowhere to go, so most of the read
+     comes from the far edge dropping away rather than the near one lifting. */
+  background: radial-gradient(55% 55% at calc(var(--pointer-x, 50) * 1%) calc(var(--pointer-y, 50) * 1%),
+      rgba(255, 255, 255, 0.85) 0%,
+      rgba(255, 255, 255, 0) 55%,
+      rgba(0, 0, 0, 0.08) 100%);
+}
+
+/* No hover layer at all without a real cursor, and none under reduced
+   motion — matching the effect's own guard, so the resting `--glow: 0`
+   can never be left visible by a stray pointer event. */
+@media (hover: none),
+(pointer: coarse),
+(prefers-reduced-motion: reduce) {
+  .card-glow::before {
+    display: none;
+  }
+
+  /* The effect never runs here, so the plate must not be left holding a
+     raised state from a stray pointer event either. */
+  .card-glow {
+    box-shadow: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   html {
     @apply font-sans;
   }

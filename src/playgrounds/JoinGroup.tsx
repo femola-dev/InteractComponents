@@ -787,7 +787,7 @@ function CommunityCreated({
      midpoint swap — so firing immediately would spend the opening burst behind
      it. 260ms is the band clearing the frame. */
   useEffect(() => {
-    let stop = () => {}
+    let stop = () => { }
     const timer = window.setTimeout(() => {
       stop = celebrate([accent, LANDING_BACKDROP.field.colorA, LANDING_BACKDROP.field.colorB, '#ffffff'])
     }, 260)

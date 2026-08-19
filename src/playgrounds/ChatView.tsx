@@ -144,18 +144,38 @@ function useCoverScale(width: number, height: number) {
  * The presence bead, placed by its core rather than its box.
  *
  * Figma exports these with the drop shadow baked into the artboard, so the file
- * is 8×8 while the dot itself is a 4px circle centred at (3.52, 3.52). The
- * design puts that circle at (13, 11) inside the 16px avatar — so the image's
- * top-left has to sit at 13 + 2 − 3.52 = 11.48. Positioning the 8px box flush to
- * the avatar's corner instead would put the bead ~3px inside where it belongs.
+ * is 8×8 while the bead itself is a 4px circle centred at (3.52, 3.52) — the box
+ * is mostly shadow room. Any size but the artboard's own therefore has to be
+ * placed off the core: flushing the box to the avatar's corner would leave the
+ * visible dot ~3px inside where the design puts it, and the error grows with the
+ * box.
+ *
+ * So the two numbers below are the whole story — where the core belongs in the
+ * avatar, and how big the box is drawn — and the offset falls out of them.
  */
+
+/** The bead's core, in the 16px avatar's own coordinates. */
+const PRESENCE_CORE = { x: 15, y: 13 }
+
+/** The artboard, drawn at 2× its export so the visible bead reads at 8px. */
+const PRESENCE_BOX = 16
+
+/** Where the core lands once the artboard is scaled to `PRESENCE_BOX`. */
+const CORE_IN_BOX = 3.52148 * (PRESENCE_BOX / 8)
+
 function PresenceDot({ presence }: { presence: Chat['presence'] }) {
   return (
     <img
       src={PRESENCE_DOTS[presence]}
       alt=""
       aria-hidden
-      className="pointer-events-none absolute top-[9.48px] left-[11.48px] size-[8px] max-w-none"
+      className="pointer-events-none absolute max-w-none"
+      style={{
+        left: PRESENCE_CORE.x - CORE_IN_BOX,
+        top: PRESENCE_CORE.y - CORE_IN_BOX,
+        width: PRESENCE_BOX,
+        height: PRESENCE_BOX,
+      }}
     />
   )
 }
