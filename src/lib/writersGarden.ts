@@ -459,7 +459,31 @@ export const HELIX_RISE = HELIX_RADIUS * DNA_RISE_RATIO * HELIX_RISE_STRETCH
  * depth — the far cards read as further away rather than merely smaller.
  */
 export const HELIX_CAMERA_DISTANCE = 9
-export const HELIX_FOV = (48 * Math.PI) / 180
+
+/**
+ * There is no field-of-view constant, because the lens is not a free choice
+ * any more — it is solved, per frame, from the size the card has to come out at.
+ *
+ * The focused card must measure exactly what the rail's focused plate measures:
+ * `FOCUS_W × FOCUS_H`, the design's own 498×517, at scale 1. Its projected
+ * half-height is `focal / (D − R)` in clip space, and clip space is half the
+ * canvas, so
+ *
+ *     focal = FOCUS_H · (D − R) / canvasHeightInCssPixels
+ *
+ * and the card lands on 517 CSS pixels at any viewport. `REST_SCALE` then does
+ * the rest untouched, exactly as it does on the rail, so an unfocused card is
+ * the rail's 320×332.
+ *
+ * What this costs is framing, and the cost is not small — see
+ * `HELIX_RADIUS`. A lens that holds the card at the design's size on a
+ * ~800px-tall window works out around 26°, which leaves roughly 1.2 pitches in
+ * frame: the focused card, and its neighbours entering at the edges rather than
+ * whole. That is the trade the geometry forces, not a tuning choice — the two
+ * quantities are reciprocal in the same tangent.
+ */
+export const HELIX_FOCAL = (canvasHeightCss: number) =>
+  (FOCUS_H * (HELIX_CAMERA_DISTANCE - HELIX_RADIUS)) / Math.max(1, canvasHeightCss)
 
 /** Where on the circle a badge faces the camera. The camera sits on +Z, and a
  *  badge's face normal is its own radial direction, so it looks straight down

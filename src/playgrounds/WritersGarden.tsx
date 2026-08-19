@@ -199,20 +199,144 @@ export function WritersGarden() {
     }
     read()
 
+    const clampIndex = (i: number) => Math.min(BADGES.length - 1, Math.max(0, i))
+
+    /* ---- Grab ----
+     *
+     * `snap-mandatory` and a JS write to `scrollTop` are incompatible: the write
+     * is not a user gesture, so the browser re-snaps on the very next frame and
+     * the helix springs back out from under the hand. So the drag switches
+     * snapping off for its own duration and back on once it has settled — which
+     * is also the whole reason the helix winds *continuously* under a drag
+     * rather than a notch at a time.
+     */
+    let snapOff = false
+    let settleTimer = 0
+
+    const releaseSnap = () => {
+      if (snapOff) return
+      snapOff = true
+      column.style.scrollSnapType = 'none'
+    }
+    const restoreSnap = () => {
+      if (!snapOff) return
+      snapOff = false
+      column.style.scrollSnapType = ''
+    }
+
+    /**
+     * Land on a badge, then hand the scroller back to the browser's snapping.
+     *
+     * Deferred rather than immediate, because restoring `snap-mandatory` while a
+     * smooth scroll is still in flight makes the browser fight its own
+     * animation — it snaps to wherever the scroll had got to and abandons the
+     * rest of it.
+     */
+    const settleOn = (i: number) => {
+      const target = clampIndex(i)
+      clearTimeout(settleTimer)
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      const behavior = reduced ? 'auto' : 'smooth'
+      column.scrollTo({ top: target * VERTICAL_PITCH, behavior })
+      if (behavior === 'auto') restoreSnap()
+      else settleTimer = window.setTimeout(restoreSnap, 480)
+    }
+
+    let dragId: number | null = null
+    let dragFrom = 0
+    let dragFromScroll = 0
+    let dragVelocity = 0
+    let dragLastY = 0
+    let dragLastAt = 0
+
+    const onPointerDown = (event: PointerEvent) => {
+      // Touch is left alone, exactly as on the horizontal rail: it already has
+      // the platform's own drag-scroll, with a fling and a rubber band this
+      // could only approximate. Mouse and pen have no drag-scroll at all, so
+      // there it is pure gain — and on a helix it is the natural gesture, since
+      // the thing being turned looks like something you would take hold of.
+      if (event.pointerType === 'touch' || event.button !== 0) return
+
+      dragId = event.pointerId
+      dragFrom = event.clientY
+      dragFromScroll = column.scrollTop
+      dragLastY = event.clientY
+      dragLastAt = performance.now()
+      dragVelocity = 0
+      dragged.current = false
+    }
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (dragId !== event.pointerId) return
+
+      const dy = event.clientY - dragFrom
+      // A few pixels of slop, so a click that shivers is still a click — and
+      // nothing happens until it is crossed. The pointer is deliberately not
+      // captured on `pointerdown`, because a capture still open at `pointerup`
+      // retargets the `click` to the capturing element, and the slot's own
+      // click — the one that centres it — would never fire.
+      if (!dragged.current) {
+        if (Math.abs(dy) <= 3) return
+        dragged.current = true
+        clearTimeout(settleTimer)
+        releaseSnap()
+        column.setPointerCapture(event.pointerId)
+        column.style.cursor = 'grabbing'
+      }
+
+      /* Plus, where the rail subtracts — the one line of it whose sign differs,
+         and the reason is the helix rather than the gesture.
+         A card's height above the camera is `(i − index) · RISE`, so a *rising*
+         index carries every card downward and badge i+1 sits above badge i.
+         That is the reverse of a document, where scrolling on pushes content up
+         and the next thing arrives from below. Feed that mapping the rail's sign
+         and the cards climb while the hand pulls down; `DRAG_DIRECTION` puts the
+         cards back under the hand, which is the only thing a grab can mean. */
+      column.scrollTop = dragFromScroll + DRAG_DIRECTION * dy
+
+      const now = performance.now()
+      const dt = now - dragLastAt
+      if (dt > 0) {
+        // Smoothed, because the release reads this exactly once: an unsmoothed
+        // sample lets the last two pixels of a long gesture decide the flick.
+        const sample = ((event.clientY - dragLastY) / dt) * 1000
+        dragVelocity = dragVelocity * 0.7 + sample * 0.3
+        dragLastY = event.clientY
+        dragLastAt = now
+      }
+    }
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (dragId !== event.pointerId) return
+      dragId = null
+      // A press that never became a drag is left to the slot's own handler.
+      if (!dragged.current) return
+      column.style.cursor = ''
+
+      // A flick throws the helix on past where it was let go of, capped at one
+      // pitch: this is twelve discrete things, and overshooting six of them to
+      // land somewhere nobody aimed at is not momentum, it is a loss of control.
+      const throw_ = Math.max(
+        -VERTICAL_PITCH,
+        Math.min(VERTICAL_PITCH, dragVelocity * 0.12),
+      )
+      // Same flip as the drag itself: the throw has to continue the gesture, so
+      // it travels the way the scroll was already going.
+      settleOn(
+        Math.round((column.scrollTop + DRAG_DIRECTION * throw_) / VERTICAL_PITCH),
+      )
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
       if (!step) return
       event.preventDefault()
       const focused = slotRefs.current.indexOf(document.activeElement as HTMLButtonElement)
       if (focused >= 0) {
-        slotRefs.current[Math.min(BADGES.length - 1, Math.max(0, focused + step))]?.focus()
+        slotRefs.current[clampIndex(focused + step)]?.focus()
         return
       }
-      const next = Math.round(column.scrollTop / VERTICAL_PITCH) + step
-      column.scrollTo({
-        top: Math.min(BADGES.length - 1, Math.max(0, next)) * VERTICAL_PITCH,
-        behavior: 'smooth',
-      })
+      settleOn(Math.round(column.scrollTop / VERTICAL_PITCH) + step)
     }
 
     // Tabbing to a badge brings it to the front, on the same `:focus-visible`
@@ -229,10 +353,23 @@ export function WritersGarden() {
     column.addEventListener('scroll', read, { passive: true })
     column.addEventListener('keydown', onKeyDown)
     column.addEventListener('focusin', onFocusIn)
+    column.addEventListener('pointerdown', onPointerDown)
+    column.addEventListener('pointermove', onPointerMove)
+    column.addEventListener('pointerup', onPointerUp)
+    // A drag that ends outside the window never fires `pointerup`, and without
+    // this the scroller would keep the grab — and its snapping switched off —
+    // for good.
+    column.addEventListener('pointercancel', onPointerUp)
     return () => {
+      clearTimeout(settleTimer)
+      restoreSnap()
       column.removeEventListener('scroll', read)
       column.removeEventListener('keydown', onKeyDown)
       column.removeEventListener('focusin', onFocusIn)
+      column.removeEventListener('pointerdown', onPointerDown)
+      column.removeEventListener('pointermove', onPointerMove)
+      column.removeEventListener('pointerup', onPointerUp)
+      column.removeEventListener('pointercancel', onPointerUp)
     }
   }, [vertical, helix])
 
@@ -1013,6 +1150,7 @@ export function WritersGarden() {
             helix={helix}
             targetRef={helixTarget}
             onFront={setActive}
+            dragged={dragged}
           />
         ) : (
         <div
@@ -1396,6 +1534,19 @@ function LayoutToggle({
  * why neither layout needed a scroll-hijacking library to feel like anything.
  */
 /**
+ * Which way a drag on the helix moves the scroll.
+ *
+ * +1, against the horizontal rail's implicit −1, and it is the helix that
+ * inverts rather than the gesture: a card's height above the camera is
+ * `(i − index) · RISE`, so a rising index carries every card *downward* and
+ * badge i+1 sits above badge i, where a document does the opposite. Held as a
+ * named constant rather than a stray `+` because it is the single place the two
+ * rails disagree, and a bare sign is exactly the kind of thing that gets
+ * "tidied" back to matching the other one.
+ */
+const DRAG_DIRECTION = 1
+
+/**
  * How far the design's 498×517 card is scaled down for the flat vertical
  * column — the no-WebGL and reduced-motion path.
  *
@@ -1413,6 +1564,7 @@ function VerticalRail({
   helix,
   targetRef,
   onFront,
+  dragged,
 }: {
   columnRef: RefObject<HTMLDivElement | null>
   setSlotRef: (i: number) => (node: HTMLButtonElement | null) => void
@@ -1420,6 +1572,8 @@ function VerticalRail({
   helix: boolean
   targetRef: { current: number }
   onFront: (index: number) => void
+  /** Set by a drag that actually moved, read by the click that follows it. */
+  dragged: RefObject<boolean>
 }) {
   return (
     // Full height, because the scroller's percentage-height lead-in and
@@ -1442,7 +1596,10 @@ function VerticalRail({
         role="listbox"
         aria-label="Badges"
         aria-orientation="vertical"
-        className="scroll-hidden absolute inset-0 snap-y snap-mandatory overflow-y-auto outline-none"
+        // `cursor-grab` because it is one: mouse and pen can take hold of the
+        // helix and turn it. `select-none` so a drag does not leave a trail of
+        // selected slot labels behind it.
+        className="scroll-hidden absolute inset-0 cursor-grab snap-y snap-mandatory select-none overflow-y-auto outline-none"
       >
         {/* Half a viewport of lead-in and lead-out, so the first and last badge
             can reach the centre. A percentage *height* — unlike the horizontal
@@ -1462,11 +1619,15 @@ function VerticalRail({
             role="option"
             aria-selected={i === active}
             aria-label={`${item.name} badge`}
-            className="block w-full shrink-0 cursor-pointer snap-center bg-transparent p-0"
+            className="block w-full shrink-0 cursor-grab snap-center bg-transparent p-0"
             style={{ height: VERTICAL_PITCH }}
-            onClick={() =>
+            onClick={() => {
+              // A pointerup after a drag still fires a click on whatever slot
+              // the cursor ended over, and centring on that would undo the
+              // drag. Same guard the horizontal rail's tiles use.
+              if (dragged.current) return
               columnRef.current?.scrollTo({ top: i * VERTICAL_PITCH, behavior: 'smooth' })
-            }
+            }}
           >
             {/* Nothing in helix mode — the canvas behind is the whole picture.
                 Without WebGL, or under reduced motion, this is the layout: the

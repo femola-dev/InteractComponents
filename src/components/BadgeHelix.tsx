@@ -19,7 +19,7 @@ import {
   HELIX_CARD_ASPECT,
   HELIX_FOG_FAR,
   HELIX_FOG_NEAR,
-  HELIX_FOV,
+  HELIX_FOCAL,
   HELIX_FRONT_PHASE,
   HELIX_LIFT,
   HELIX_LOCAL_PERSPECTIVE,
@@ -404,13 +404,18 @@ function link(gl: WebGLRenderingContext, vs: string, fs: string, tag: string) {
 /**
  * A standard perspective projection, column-major for `uniformMatrix4fv`.
  *
+ * Takes the focal length rather than a field of view, because nothing here ever
+ * chooses an angle: the focal length is solved from the size the focused card
+ * has to come out at — see `HELIX_FOCAL` — and converting it to an angle only
+ * to take the tangent again would be a round trip through two trig calls for
+ * the same number.
+ *
  * Written out rather than pulled from a matrix library because it is the only
  * matrix in the file — the view transform is a pure translation (the camera
  * never rotates; the *helix* turns) and so is applied as a vector subtraction
  * in the vertex shaders instead.
  */
-function perspective(out: Float32Array, fovY: number, aspect: number, near: number, far: number) {
-  const f = 1 / Math.tan(fovY / 2)
+function perspective(out: Float32Array, f: number, aspect: number, near: number, far: number) {
   out.fill(0)
   out[0] = f / aspect
   out[5] = f
@@ -753,7 +758,8 @@ export function BadgeHelix({
     let width = 0
     let height = 0
     let aspect = 1
-    const tanHalfFov = Math.tan(HELIX_FOV / 2)
+    /** Solved on every resize, not chosen — see `HELIX_FOCAL`. */
+    let focal = 1
 
     const resize = () => {
       const w = Math.max(1, Math.round(canvas.clientWidth * dpr))
@@ -765,7 +771,11 @@ export function BadgeHelix({
       canvas.width = w
       canvas.height = h
       gl.viewport(0, 0, w, h)
-      perspective(proj, HELIX_FOV, aspect, 0.1, 100)
+      /* From the CSS height, not the backing-store one: `FOCUS_H` is a CSS
+         pixel measurement, and the card has to come out at 517 of those on a
+         retina display exactly as it does anywhere else. */
+      focal = HELIX_FOCAL(canvas.clientHeight)
+      perspective(proj, focal, aspect, 0.1, 100)
       gl.useProgram(cardProgram)
       gl.uniformMatrix4fv(cardUniforms.proj, false, proj)
     }
@@ -782,8 +792,10 @@ export function BadgeHelix({
      */
     const pick = (phase: number, camY: number) => {
       if (!pointerInside) return -1
-      const dx = pointerX * tanHalfFov * aspect
-      const dy = pointerY * tanHalfFov
+      // The ray has to be built with the lens the frame was actually drawn
+      // with, and that lens is resolved per resize rather than fixed.
+      const dx = (pointerX / focal) * aspect
+      const dy = pointerY / focal
       const dz = -1
       const len = Math.hypot(dx, dy, dz)
       const rx = dx / len
