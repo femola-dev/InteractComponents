@@ -413,6 +413,19 @@ export function WritersGarden() {
   const [panelOpen, setPanelOpen] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  /**
+   * Whichever control last opened the panel — the caption's link or the centred
+   * card. There are two ways in now, and Escape has to return focus to the one
+   * that was actually used; sending it to the caption after a card opened it
+   * would move the keyboard out of the rail without being asked to.
+   */
+  const openerRef = useRef<HTMLElement | null>(null)
+
+  // The three boxes the rail has to sit between — see `useBandShift`.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const navRef = useRef<HTMLDivElement>(null)
+  const captionRef = useRef<HTMLDivElement>(null)
+  const bandShift = useBandShift(rootRef, navRef, captionRef, !vertical)
 
   useEffect(() => {
     if (!panelOpen) return
@@ -423,7 +436,11 @@ export function WritersGarden() {
       // Escape can be pressed from anywhere on the page, including from inside
       // the panel's own text if somebody has tabbed into it. Put focus
       // somewhere deliberate rather than leaving it on a node about to unmount.
-      triggerRef.current?.focus()
+      // The card may have been scrolled out of the rail's centre in the
+      // meantime, so fall back to the caption's link, which is always there.
+      const opener = openerRef.current
+      if (opener?.isConnected) opener.focus()
+      else triggerRef.current?.focus()
     }
 
     /**
@@ -443,6 +460,11 @@ export function WritersGarden() {
       if (!target) return
       if (panelRef.current?.contains(target)) return
       if (triggerRef.current?.contains(target)) return
+      // The centred card is a toggle too, and marks itself as one. Without
+      // this it would be closed here and reopened by its own click in the same
+      // gesture, which reads as a click that did nothing.
+      const el = target instanceof Element ? target : target.parentElement
+      if (el?.closest('[data-panel-toggle]')) return
       setPanelOpen(false)
     }
 
@@ -1124,6 +1146,28 @@ export function WritersGarden() {
     })
   }
 
+  /**
+   * What a click on a card means, in both layouts.
+   *
+   * Off-centre it means "bring this one in", which is all it used to mean. On
+   * the card that is *already* centred there is nothing left to centre, and
+   * that card is the one the caption is describing and the one the panel would
+   * open on — so it becomes the second way into the requirements, alongside the
+   * caption's link. A toggle rather than an open, so the gesture that shows the
+   * panel is also the one that puts it away.
+   */
+  const activateCard = (i: number, node: HTMLElement | null, centre: () => void) => {
+    // A pointerup after a drag still fires a click on whatever the cursor ended
+    // over. Neither centring nor opening a panel is what that drag asked for.
+    if (dragged.current) return
+    if (i !== active) {
+      centre()
+      return
+    }
+    openerRef.current = node
+    setPanelOpen((open) => !open)
+  }
+
   const badge = BADGES[active]
   const morph = captionMorph(reducedMotion)
 
@@ -1138,9 +1182,17 @@ export function WritersGarden() {
        and a caption gave neither.
        So: `h-svh` exactly, not `min-h-svh` — this is a board, not a document,
        and it must not be able to grow a scrollbar. */
-    <div className="font-lausanne relative h-svh w-full overflow-hidden bg-white">
-      {/* Node 318:21420 — the rail, now the full viewport. */}
-      <div className="absolute inset-0 flex items-center">
+    <div
+      ref={rootRef}
+      className="font-lausanne relative h-svh w-full overflow-hidden bg-white"
+    >
+      {/* Node 318:21420 — the rail, still the full viewport, lifted to centre
+          on the band the header and caption leave rather than on the viewport
+          itself. See `useBandShift` for why it moves instead of being inset. */}
+      <div
+        className="absolute inset-0 flex items-center"
+        style={bandShift ? { transform: `translateY(${bandShift}px)` } : undefined}
+      >
         {vertical ? (
           <VerticalRail
             columnRef={columnRef}
@@ -1149,7 +1201,8 @@ export function WritersGarden() {
             helix={helix}
             targetRef={helixTarget}
             onFront={setActive}
-            dragged={dragged}
+            onActivate={activateCard}
+            panelOpen={panelOpen}
           />
         ) : (
         <div
@@ -1183,13 +1236,17 @@ export function WritersGarden() {
               key={item.name}
               ref={setTileRef(i)}
               type="button"
-              onClick={() => {
-                if (dragged.current) return
-                centreOn(i)
-              }}
+              onClick={(event) => activateCard(i, event.currentTarget, () => centreOn(i))}
+              // Only the centred card carries the disclosure, because it is the
+              // only one a click opens the panel from — the rest still just
+              // centre. `option` takes `aria-expanded`, so the second way in is
+              // announced rather than being a secret gesture.
               aria-label={`${item.name} badge`}
               role="option"
               aria-selected={i === active}
+              aria-expanded={i === active ? panelOpen : undefined}
+              aria-controls={i === active ? PANEL_ID : undefined}
+              data-panel-toggle={i === active ? '' : undefined}
               data-card
               data-active={i === active}
               className="relative shrink-0 cursor-pointer snap-center bg-transparent p-0"
@@ -1302,7 +1359,10 @@ export function WritersGarden() {
           the wheel does nothing and a drag cannot start — and the pill is a
           label, so it has no business swallowing either. Only the tabs take
           the pointer back. */}
-      <div className="pointer-events-none absolute top-9 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-1 rounded-xl bg-[#f6f5f5] pb-1">
+      <div
+        ref={navRef}
+        className="pointer-events-none absolute top-9 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-1 rounded-xl bg-[#f6f5f5] pb-1"
+      >
         {/* Node 317:17934 — full-bleed across the well, so the pill's own width
             is what sizes the whole thing and the tab row centres under it. */}
         <div className="flex w-full items-center justify-center rounded-xl bg-black px-5 py-3">
@@ -1321,6 +1381,7 @@ export function WritersGarden() {
           middle of the bottom edge it would otherwise be a hole in the helix's
           scroll surface exactly where a thumb lands. */}
       <div
+        ref={captionRef}
         // 62 = the design's 38 off the bottom edge, plus 24 to lift it clear of
         // it. The board had the caption as the last row of a column, where its
         // gap came from the page's own bottom padding; floating it took that
@@ -1357,7 +1418,10 @@ export function WritersGarden() {
             <button
               ref={triggerRef}
               type="button"
-              onClick={() => setPanelOpen((open) => !open)}
+              onClick={() => {
+                openerRef.current = triggerRef.current
+                setPanelOpen((open) => !open)
+              }}
               aria-expanded={panelOpen}
               aria-controls={PANEL_ID}
               // `pointer-events-auto` because the card around it is transparent
@@ -1446,6 +1510,72 @@ export function WritersGarden() {
       </AnimatePresence>
     </div>
   )
+}
+
+/**
+ * How far to lift the rail so it centres on the band between the header nav
+ * and the caption, rather than on the viewport.
+ *
+ * Those two float *over* the rail rather than sharing a column with it, so the
+ * space they leave is not centred on the viewport: the caption is the taller of
+ * the pair and sits further in from its edge, which pulls the free band upward
+ * and left the rail reading low against it. Both are measured rather than
+ * derived from the inset constants in the markup, because the nav and the
+ * caption each wrap and grow a line at narrow widths.
+ *
+ * A transform rather than insetting or padding the rail: the scroller clips on
+ * the Y axis — `overflow-y-hidden`, which the horizontal scroll needs — so
+ * anything that *shrinks* it starts cutting off the focused plate's 517px on a
+ * short viewport. Moving it leaves every box exactly the size it was.
+ *
+ * Off in the helix, which wants the whole viewport and has no rail to centre.
+ */
+function useBandShift(
+  rootRef: RefObject<HTMLElement | null>,
+  navRef: RefObject<HTMLElement | null>,
+  captionRef: RefObject<HTMLElement | null>,
+  enabled: boolean,
+) {
+  const [shift, setShift] = useState(0)
+
+  // Layout effect so the rail is never painted at the viewport centre for a
+  // frame and then snapped up — that reads as a jump on every mode switch.
+  useLayoutEffect(() => {
+    if (!enabled) {
+      setShift(0)
+      return
+    }
+
+    const root = rootRef.current
+    const nav = navRef.current
+    const caption = captionRef.current
+    if (!root || !nav || !caption) return
+
+    const read = () => {
+      // Rects rather than offsets: both boxes are centred with a translate,
+      // which `offsetTop`/`offsetHeight` do not see, and the question here is
+      // where they land on screen.
+      const bounds = root.getBoundingClientRect()
+      const top = nav.getBoundingClientRect().bottom - bounds.top
+      const bottom = caption.getBoundingClientRect().top - bounds.top
+      // Rounded, so a subpixel wobble in the caption's wrapped height cannot
+      // rerender the rail on every resize frame.
+      const next = Math.round((top + bottom) / 2 - bounds.height / 2)
+      setShift((current) => (current === next ? current : next))
+    }
+
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    // No feedback loop to worry about: the shift moves the rail, and the rail
+    // is not one of the three boxes being measured.
+    const observer = new ResizeObserver(read)
+    observer.observe(root)
+    observer.observe(nav)
+    observer.observe(caption)
+    return () => observer.disconnect()
+  }, [rootRef, navRef, captionRef, enabled])
+
+  return shift
 }
 
 /**
@@ -1569,7 +1699,8 @@ function VerticalRail({
   helix,
   targetRef,
   onFront,
-  dragged,
+  onActivate,
+  panelOpen,
 }: {
   columnRef: RefObject<HTMLDivElement | null>
   setSlotRef: (i: number) => (node: HTMLButtonElement | null) => void
@@ -1577,9 +1708,29 @@ function VerticalRail({
   helix: boolean
   targetRef: { current: number }
   onFront: (index: number) => void
-  /** Set by a drag that actually moved, read by the click that follows it. */
-  dragged: RefObject<boolean>
+  /** The shared card-click rule — centre it, or open the panel on the centred
+   *  one. Owns the post-drag guard, which is why the slot no longer needs one. */
+  onActivate: (i: number, node: HTMLElement | null, centre: () => void) => void
+  panelOpen: boolean
 }) {
+  /**
+   * Whether the pointer is over one of the helix's cards, reported by the
+   * canvas's own ray pick.
+   *
+   * The scroll layer cannot answer this itself: its hit targets are full-width
+   * bands one pitch tall, so most of a band is empty page next to a card, and
+   * which card a band sits under changes as the helix winds. Left to the DOM,
+   * the whole column reads as grabbable — including the gaps either side of the
+   * cards, where there is nothing to click.
+   */
+  const [overCard, setOverCard] = useState(false)
+
+  // Grab is the layer's real affordance — the helix turns under a drag from
+  // anywhere — and pointer is the exception, held only while a card is under
+  // the cursor. In the fallback there is no canvas to pick with, so the cards
+  // are real DOM and carry it themselves.
+  const cursor = overCard ? 'cursor-pointer' : 'cursor-grab'
+
   return (
     // Full height, because the scroller's percentage-height lead-in and
     // lead-out resolve against it — and because the helix has nothing to show
@@ -1590,6 +1741,7 @@ function VerticalRail({
           badges={BADGES}
           targetRef={targetRef}
           onFront={onFront}
+          onHover={(index) => setOverCard(index >= 0)}
           fog={PAGE}
           className="pointer-events-none absolute inset-0"
         />
@@ -1601,10 +1753,10 @@ function VerticalRail({
         role="listbox"
         aria-label="Badges"
         aria-orientation="vertical"
-        // `cursor-grab` because it is one: mouse and pen can take hold of the
-        // helix and turn it. `select-none` so a drag does not leave a trail of
-        // selected slot labels behind it.
-        className="scroll-hidden absolute inset-0 cursor-grab snap-y snap-mandatory select-none overflow-y-auto outline-none"
+        // Grabbable because it is: mouse and pen can take hold of the helix
+        // anywhere and turn it. `select-none` so a drag does not leave a trail
+        // of selected slot labels behind it.
+        className={`scroll-hidden absolute inset-0 snap-y snap-mandatory select-none overflow-y-auto outline-none ${cursor}`}
       >
         {/* Half a viewport of lead-in and lead-out, so the first and last badge
             can reach the centre. A percentage *height* — unlike the horizontal
@@ -1624,15 +1776,18 @@ function VerticalRail({
             role="option"
             aria-selected={i === active}
             aria-label={`${item.name} badge`}
-            className="block w-full shrink-0 cursor-grab snap-center bg-transparent p-0"
+            // Same disclosure as the horizontal tile: the slot at the front of
+            // the helix is the one that opens the panel.
+            aria-expanded={i === active ? panelOpen : undefined}
+            aria-controls={i === active ? PANEL_ID : undefined}
+            data-panel-toggle={i === active ? '' : undefined}
+            className={`block w-full shrink-0 snap-center bg-transparent p-0 ${cursor}`}
             style={{ height: VERTICAL_PITCH }}
-            onClick={() => {
-              // A pointerup after a drag still fires a click on whatever slot
-              // the cursor ended over, and centring on that would undo the
-              // drag. Same guard the horizontal rail's tiles use.
-              if (dragged.current) return
-              columnRef.current?.scrollTo({ top: i * VERTICAL_PITCH, behavior: 'smooth' })
-            }}
+            onClick={(event) =>
+              onActivate(i, event.currentTarget, () => {
+                columnRef.current?.scrollTo({ top: i * VERTICAL_PITCH, behavior: 'smooth' })
+              })
+            }
           >
             {/* Nothing in helix mode — the canvas behind is the whole picture.
                 Without WebGL, or under reduced motion, this is the layout: the
@@ -1642,7 +1797,7 @@ function VerticalRail({
                 offset inside it is the design's own number times one factor. */}
             {!helix && (
               <div
-                className="relative mx-auto overflow-clip"
+                className="relative mx-auto cursor-pointer overflow-clip"
                 style={{
                   width: FOCUS_W * FALLBACK_CARD,
                   height: FOCUS_H * FALLBACK_CARD,

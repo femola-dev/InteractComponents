@@ -524,6 +524,16 @@ export type BadgeHelixProps = {
   targetRef: { current: number }
   /** Called when the badge nearest the front changes. */
   onFront?: (index: number) => void
+  /**
+   * Called with the card the pointer is over, or -1 when it is over none.
+   *
+   * The same pick that drives the tilt and the glow, surfaced so the layer
+   * above can answer "is the pointer on a card" — which it cannot work out for
+   * itself: its hit targets are full-width bands, and the card a given band is
+   * under changes as the helix winds. Fires only on change, and only for a
+   * pointer that can hover.
+   */
+  onHover?: (index: number) => void
   /** The page colour the far side of the helix fades into. */
   fog: string
   /** Drawn instead when WebGL is unavailable or a shader will not build. */
@@ -535,6 +545,7 @@ export function BadgeHelix({
   badges,
   targetRef,
   onFront,
+  onHover,
   fog,
   fallback = null,
   className,
@@ -543,6 +554,8 @@ export function BadgeHelix({
   const [supported, setSupported] = useState(true)
   const onFrontRef = useRef(onFront)
   onFrontRef.current = onFront
+  const onHoverRef = useRef(onHover)
+  onHoverRef.current = onHover
   const badgesRef = useRef(badges)
   badgesRef.current = badges
 
@@ -898,6 +911,11 @@ export function BadgeHelix({
             toGlowX(0.5)
             toGlowY(0.5)
           }
+          // On the raw pick, not `hover.index`: the two disagree on the way
+          // out by design (see above), and the cursor has to change the
+          // instant the pointer leaves the card, not when the glow finishes
+          // fading off it.
+          onHoverRef.current?.(picked)
           pickedLast = picked
         }
         if (picked >= 0) {

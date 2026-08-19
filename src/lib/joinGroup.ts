@@ -31,11 +31,38 @@ import iconMultiChart from '../assets/icons/join-group/multi-chart.svg'
 import iconMedal from '../assets/icons/join-group/medal.svg'
 import iconDiscoverSearch from '../assets/icons/join-group/discover-search.svg'
 import iconRocket from '../assets/icons/join-group/icon-rocket.svg'
+import iconAddImage from '../assets/icons/join-group/icon-add-image.svg'
 import glowLeft from '../assets/icons/join-group/glow-left.svg'
 import glowRight from '../assets/icons/join-group/glow-right.svg'
 import landingGlowLeft from '../assets/icons/join-group/landing-glow-left.svg'
 import landingGlowRight from '../assets/icons/join-group/landing-glow-right.svg'
 import grain from '../assets/images/join-group/grain.png'
+import {
+  Atom,
+  Bookmark,
+  Camera,
+  Cloud,
+  Compass,
+  Diamond,
+  Disc,
+  Droplet,
+  Flame,
+  Ghost,
+  Heart,
+  MessageCircle,
+  Moon,
+  Mountain,
+  Palette as PaletteIcon,
+  Puzzle,
+  Shapes,
+  Shield,
+  Sparkle,
+  Star,
+  Tag,
+  Target,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 
 export {
   iconVideoGenerate,
@@ -49,8 +76,88 @@ export {
   iconMedal,
   iconDiscoverSearch,
   iconRocket,
+  iconAddImage,
   grain,
 }
+
+/**
+ * What "Change Icon" offers — the tray behind node 328:23366.
+ *
+ * Lucide rather than more files in `assets/icons`, and the reason is arithmetic:
+ * the screen's own set is nine glyphs drawn for nine fixed jobs, and a picker
+ * wants a *range* — someone naming a community is choosing an emblem, not
+ * picking from a UI kit. Lucide is already a dependency, it is one consistent
+ * family, and it ships six thousand of them.
+ *
+ * Every one of these is *filled*, to match the file's movie reel, which is a
+ * solid shape rather than an outline. That is a real constraint on which icons
+ * can be here, because lucide draws outlines: filling a path that never returns
+ * to where it started makes SVG close it with a straight line, and the result is
+ * a wedge across the glyph. Only closed silhouettes survive it — every entry
+ * below was checked by walking its path data and measuring the gap between each
+ * subpath's first and last point. That rules out most of the obvious choices:
+ * Film, Music, Mic, Trophy, Globe, Users and Code all smear, which is why the
+ * set leans toward emblems and away from pictograms.
+ *
+ * The reel itself stays, and stays first, so a form nobody touches still renders
+ * exactly as the file draws it — see `CommunityIcon` for what it costs.
+ */
+type CommunityIconBase = {
+  id: string
+  /** The accessible name of the tile. The tray is a radiogroup, so every option
+   *  needs one — a grid of unlabelled glyphs is unusable by voice or by screen
+   *  reader. */
+  label: string
+}
+
+/**
+ * A union of two whole shapes rather than a base intersected with a union of
+ * the two tails: TypeScript narrows the first on `if (icon.src)` and does not
+ * reliably narrow the second, so the tidier-looking spelling is the one that
+ * makes every use site need a non-null assertion.
+ */
+export type CommunityIcon =
+  | (CommunityIconBase & {
+      /**
+       * The design's own export, for the one icon the file actually draws.
+       *
+       * It cannot be an `<img>` everywhere it appears: the file bakes `GLYPH`
+       * into its fill, which is correct on the accent square and invisible on a
+       * tray tile. So it is drawn as a *mask* instead and takes whatever ink it
+       * is handed — the one place this screen renders an asset by its shape
+       * rather than by its colours.
+       */
+      src: string
+      Glyph?: undefined
+    })
+  | (CommunityIconBase & { Glyph: LucideIcon; src?: undefined })
+
+export const COMMUNITY_ICONS: CommunityIcon[] = [
+  { id: 'reel', label: 'Film reel', src: iconMovieReel },
+  { id: 'camera', label: 'Camera', Glyph: Camera },
+  { id: 'disc', label: 'Disc', Glyph: Disc },
+  { id: 'sparkle', label: 'Sparkle', Glyph: Sparkle },
+  { id: 'flame', label: 'Flame', Glyph: Flame },
+  { id: 'zap', label: 'Lightning', Glyph: Zap },
+  { id: 'star', label: 'Star', Glyph: Star },
+  { id: 'heart', label: 'Heart', Glyph: Heart },
+  { id: 'diamond', label: 'Diamond', Glyph: Diamond },
+  { id: 'compass', label: 'Compass', Glyph: Compass },
+  { id: 'shield', label: 'Shield', Glyph: Shield },
+  { id: 'target', label: 'Target', Glyph: Target },
+  { id: 'message', label: 'Message', Glyph: MessageCircle },
+  { id: 'bookmark', label: 'Bookmark', Glyph: Bookmark },
+  { id: 'palette', label: 'Palette', Glyph: PaletteIcon },
+  { id: 'shapes', label: 'Shapes', Glyph: Shapes },
+  { id: 'puzzle', label: 'Puzzle', Glyph: Puzzle },
+  { id: 'tag', label: 'Tag', Glyph: Tag },
+  { id: 'moon', label: 'Moon', Glyph: Moon },
+  { id: 'cloud', label: 'Cloud', Glyph: Cloud },
+  { id: 'droplet', label: 'Droplet', Glyph: Droplet },
+  { id: 'mountain', label: 'Mountain', Glyph: Mountain },
+  { id: 'ghost', label: 'Ghost', Glyph: Ghost },
+  { id: 'atom', label: 'Atom', Glyph: Atom },
+]
 
 /* ---- Surfaces ---- */
 
@@ -70,6 +177,16 @@ export const PILL = '#121212'
 export const LABEL = '#898989'
 /** The trailing half of an access row — the explanation, not the choice. */
 export const DIM = '#575757'
+/**
+ * The community glyph, on its accent square.
+ *
+ * Sampled from the file's own movie-reel export rather than set to black: it is
+ * a near-black plum, and against twelve saturated accents that reads as ink the
+ * colour was mixed into rather than as a hole punched through it. Safe across
+ * the whole palette — every accent in `ACCENTS` is a mid-to-bright hue, so
+ * there is no swatch this disappears against.
+ */
+export const GLYPH = '#210125'
 
 /* ---- Accents ---- */
 
@@ -302,6 +419,9 @@ export const COPY = {
   title: 'Content creators inner circle',
   blurb:
     'Create a private space where video creators can share content, exchange feedback, and grow together—away from the noise of public platforms.',
+  changeIcon: 'Change Icon',
+  iconTrayTitle: 'Choose an icon',
+  iconTrayClose: 'Close',
   nameLabel: 'Community name/customization',
   namePlaceholder: 'examples: full-time creators, storyteller collective etc.',
   accessLabel: 'Community access type',

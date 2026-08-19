@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type Ref,
 } from 'react'
 import { AnimatePresence, motion, type Variants } from 'framer-motion'
 import { transitionFast, transitionSmooth, fadeBlurIn } from '../lib/motion'
@@ -16,12 +17,15 @@ import { GlowField } from '../components/GlowField'
 import { CheckIcon, CopyIcon, LinkIcon } from '../components/icons'
 import { LinkedInMark, WhatsAppMark, XMark } from '../components/social-marks'
 import { celebrate } from '../lib/confetti'
+import { X } from 'lucide-react'
 import {
   ACCENTS,
   ACCESS,
   ACTION,
   CARD,
+  COMMUNITY_ICONS,
   COPY,
+  GLYPH,
   DEFAULT_ACCENT,
   DIM,
   EDGE,
@@ -37,10 +41,10 @@ import {
   communityLink,
   communityUrl,
   grain,
+  iconAddImage,
   iconColorPalette,
   iconDiscoverSearch,
   iconMedal,
-  iconMovieReel,
   iconPencilNib,
   iconRocket,
   iconTickOff,
@@ -48,6 +52,7 @@ import {
   iconVideoGenerate,
   type AccessId,
   type BackdropSpec,
+  type CommunityIcon,
   type Feature,
 } from '../lib/joinGroup'
 
@@ -534,6 +539,216 @@ function FeatureTile({ feature, accent, on, onToggle }: FeatureTileProps) {
  * There is nothing to clear by hand, and no way for a field to survive a
  * restart because someone forgot to add it to a reset function.
  */
+/**
+ * A community glyph, at whatever size and ink it is asked for.
+ *
+ * One renderer for the avatar and the tray, because the two have to agree: the
+ * tile is a preview of what the avatar will become, and a preview drawn by
+ * different code is a preview that can lie.
+ *
+ * Both branches produce a *solid* shape. The lucide icons are filled rather
+ * than stroked — `fill` and `stroke` on the same colour, with the stroke kept
+ * thin so it firms the silhouette's edge instead of thickening it — because the
+ * file's own reel is a filled glyph and an outline sitting where it used to be
+ * reads as a different class of thing.
+ */
+function CommunityGlyph({
+  icon,
+  size,
+  ink,
+}: {
+  icon: CommunityIcon
+  size: number
+  ink: string
+}) {
+  const { src, Glyph } = icon
+  if (src) {
+    /* Masked, not `<img>`. The export bakes its fill in, so an `<img>` can only
+       ever be `GLYPH` — right on the accent square it was drawn for, and all but
+       invisible on a `FIELD` tray tile. A mask keeps the shape and takes the
+       colour from underneath it. */
+    return (
+      <span
+        aria-hidden
+        style={{
+          display: 'block',
+          width: size,
+          height: size,
+          backgroundColor: ink,
+          maskImage: `url(${src})`,
+          WebkitMaskImage: `url(${src})`,
+          maskSize: 'contain',
+          WebkitMaskSize: 'contain',
+          maskRepeat: 'no-repeat',
+          WebkitMaskRepeat: 'no-repeat',
+        }}
+      />
+    )
+  }
+  /* Unreachable — the union has no third case — but `src` is a `string`, not a
+     unit type, so it cannot discriminate and TypeScript will not narrow past
+     the branch above on its own. */
+  if (!Glyph) return null
+  return <Glyph size={size} fill={ink} color={ink} strokeWidth={1.25} />
+}
+
+/** Wired to the trigger's `aria-controls`, so the two have to agree on it. */
+const TRAY_ID = 'join-group-icon-tray'
+
+/** Eight across, three down — see `COMMUNITY_ICONS` for why twenty-four. */
+const TRAY_COLUMNS = 8
+
+/**
+ * The icon picker — a tray that rises from the bottom of the screen.
+ *
+ * Built out of the form's own parts rather than a new surface: `CARD` over the
+ * page, `FIELD` tiles with `EDGE` borders, the 10px radius the form card uses
+ * and the 5px the fields use, `LABEL` for the heading. The one thing it adds is
+ * the accent, and only on the chosen tile — which makes the selection read as
+ * the same colour decision the swatch picker above it makes, rather than as a
+ * second highlight colour the screen has to learn.
+ *
+ * A radiogroup, because that is what it is: twenty-four options, exactly one
+ * chosen, and the choice takes effect immediately. Roving tabindex so the grid
+ * is one tab stop, with the arrows walking it in two dimensions — left and
+ * right by one, up and down by a row — because a 3×8 grid navigated as a flat
+ * list of 24 is a grid in name only.
+ */
+function IconTray({
+  ref,
+  chosen,
+  accent,
+  onChoose,
+  onClose,
+  labelledBy,
+}: {
+  /** React 19 passes `ref` as an ordinary prop, so no `forwardRef` wrapper. */
+  ref: Ref<HTMLDivElement>
+  chosen: CommunityIcon
+  accent: string
+  onChoose: (icon: CommunityIcon) => void
+  onClose: () => void
+  labelledBy: string
+}) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+  const index = COMMUNITY_ICONS.findIndex(i => i.id === chosen.id)
+
+  /* Focus opens on the current choice, not on the first tile: the tray exists
+     to change a value that already has one, and landing on Film every time
+     would make the arrows measure from somewhere the user did not leave off. */
+  useEffect(() => {
+    refs.current[Math.max(0, index)]?.focus()
+    // Mount only — refocusing on every change would fight the click that caused
+    // it, and the arrow keys already move focus themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const move = (from: number, delta: number) => {
+    const next = Math.min(COMMUNITY_ICONS.length - 1, Math.max(0, from + delta))
+    if (next === from) return
+    onChoose(COMMUNITY_ICONS[next])
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <motion.div
+      ref={ref}
+      id={TRAY_ID}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={labelledBy}
+      /* Fixed, not absolute. The form screen is `min-h-svh` and grows with its
+         content, so a tray anchored to the bottom of *that* would sit below the
+         fold on a short window. The viewport is the thing it is a tray of. */
+      /* Hung under the trigger rather than floated at the bottom of the
+         window: the button is at the top-right of the banner, and a tray that
+         opens two hundred pixels away from the thing that opened it makes the
+         eye go looking. Right edges aligned, 8px below — so it reads as the
+         button unfolding.
+         Narrower than the 558px form it serves, which the accent picker already
+         establishes as this screen's idea of a chooser: a small object over the
+         thing it edits, not a second panel the width of it. 420 also lands the
+         tiles at 41.5px, the scale of the form's own 48px fields and 32px
+         swatch. */
+      className="absolute top-[106px] right-4 z-30 w-[420px] max-w-full origin-top-right rounded-[10px] border p-4 shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
+      style={{ backgroundColor: CARD, borderColor: EDGE }}
+      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -6, scale: 0.97 }}
+      transition={transitionSmooth}
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <p
+          id={labelledBy}
+          className="text-[14px] leading-[1.0008] tracking-[-0.28px]"
+          style={{ color: LABEL }}
+        >
+          {COPY.iconTrayTitle}
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={COPY.iconTrayClose}
+          className="flex size-6 cursor-pointer items-center justify-center rounded-[5px] border transition-colors"
+          style={{ backgroundColor: FIELD, borderColor: EDGE }}
+        >
+          <X size={14} color={LABEL} />
+        </button>
+      </div>
+
+      <div
+        role="radiogroup"
+        aria-labelledby={labelledBy}
+        className="grid gap-2"
+        style={{ gridTemplateColumns: `repeat(${TRAY_COLUMNS}, minmax(0, 1fr))` }}
+      >
+        {COMMUNITY_ICONS.map((item, i) => {
+          const selected = item.id === chosen.id
+          return (
+            <button
+              key={item.id}
+              ref={node => {
+                refs.current[i] = node
+              }}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={item.label}
+              // One tab stop for the whole grid; the arrows do the rest.
+              tabIndex={selected ? 0 : -1}
+              onClick={() => onChoose(item)}
+              onKeyDown={event => {
+                const delta =
+                  event.key === 'ArrowRight'
+                    ? 1
+                    : event.key === 'ArrowLeft'
+                      ? -1
+                      : event.key === 'ArrowDown'
+                        ? TRAY_COLUMNS
+                        : event.key === 'ArrowUp'
+                          ? -TRAY_COLUMNS
+                          : 0
+                if (!delta) return
+                event.preventDefault()
+                move(i, delta)
+              }}
+              className="flex aspect-square cursor-pointer items-center justify-center rounded-[5px] border transition-colors"
+              style={{
+                // The chosen tile wears the community's own accent, so picking
+                // an icon and picking a colour read as one decision.
+                backgroundColor: selected ? accent : FIELD,
+                borderColor: selected ? accent : EDGE,
+              }}
+            >
+              <CommunityGlyph icon={item} size={18} ink={selected ? GLYPH : LABEL} />
+            </button>
+          )
+        })}
+      </div>
+    </motion.div>
+  )
+}
+
 function CommunityForm({
   onRestart,
   onCreate,
@@ -546,6 +761,51 @@ function CommunityForm({
   const [access, setAccess] = useState<AccessId>('private')
   const [picked, setPicked] = useState<string[]>([])
   const [created, setCreated] = useState(false)
+  /** The avatar's glyph, and whether the picker is open. The icon is held as
+   *  the entry rather than an index, so nothing downstream has to know the
+   *  list's order to render it. */
+  const [chosen, setChosen] = useState<CommunityIcon>(COMMUNITY_ICONS[0])
+  const [trayOpen, setTrayOpen] = useState(false)
+  const trayRef = useRef<HTMLDivElement>(null)
+  const trayTriggerRef = useRef<HTMLButtonElement>(null)
+  const trayLabelId = useId()
+
+  /**
+   * Escape and outside-press close the tray.
+   *
+   * `pointerdown` in the capture phase rather than `click`, so a press that
+   * lands on the form behind dismisses the tray *and* still reaches whatever it
+   * was aimed at — one gesture, both outcomes. The trigger is excluded because
+   * it toggles, and would otherwise be closed here and reopened by its own
+   * handler in the same press.
+   */
+  useEffect(() => {
+    if (!trayOpen) return
+
+    const close = () => {
+      setTrayOpen(false)
+      trayTriggerRef.current?.focus()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (trayRef.current?.contains(target)) return
+      if (trayTriggerRef.current?.contains(target)) return
+      // No focus return here: the pointer has already chosen where to go, and
+      // yanking focus back to the trigger would fight it.
+      setTrayOpen(false)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, [trayOpen])
 
   const toggle = (id: string) =>
     setPicked(prev => (prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]))
@@ -632,13 +892,74 @@ function CommunityForm({
                  against 50, so a real border would shrink the glyph's frame. */
               style={{ boxShadow: `0 0 0 2.5px ${CARD}` }}
             >
-              <img
-                src={iconMovieReel}
-                alt=""
-                className="absolute max-w-none"
-                style={{ left: 14.0625, top: 14.0625, width: 21.875, height: 21.875 }}
-              />
+              {/* The two glyphs have to overlap rather than take turns — a
+                  `wait` would empty the avatar for a beat and leave a bare
+                  accent square. The box is the file's own 21.875px at its own
+                  offset; only what is drawn inside it has changed. */}
+              <AnimatePresence initial={false}>
+                <motion.div
+                  key={chosen.id}
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.7 }}
+                  transition={transitionFast}
+                  className="absolute"
+                  style={{ left: 14.0625, top: 14.0625, width: 21.875, height: 21.875 }}
+                >
+                  <CommunityGlyph icon={chosen} size={21.875} ink={GLYPH} />
+                </motion.div>
+              </AnimatePresence>
             </motion.div>
+
+            {/* Node 328:23366 — "Change Icon".
+                16px in from the banner's right edge, which is the avatar's own
+                inset on the left, so the two are hung on the same margin. And
+                72px down, which puts it inside the band the avatar occupies
+                rather than on the banner proper — the avatar overhangs the
+                bottom edge by 20px and this overhangs by 13, so they read as one
+                row. That pairing is the point: this is the control for that
+                glyph, and sitting level with it says so without a label. */}
+            <button
+              ref={trayTriggerRef}
+              type="button"
+              onClick={() => setTrayOpen(open => !open)}
+              aria-expanded={trayOpen}
+              aria-controls={TRAY_ID}
+              className="absolute top-[72px] right-4 flex cursor-pointer items-center gap-1 rounded-[5px] border px-1.5 py-1 transition-colors"
+              style={{
+                backgroundColor: trayOpen ? EDGE : FIELD,
+                borderColor: EDGE,
+              }}
+            >
+              <img src={iconAddImage} alt="" className="size-4 shrink-0" />
+              <span
+                className="text-[14px] leading-[1.0008] tracking-[-0.28px] whitespace-nowrap"
+                style={{ color: LABEL }}
+              >
+                {COPY.changeIcon}
+              </span>
+            </button>
+
+            {/* Inside the banner, because that is what it is positioned
+                against: the banner is the nearest `relative` ancestor, so the
+                tray's `top`/`right` are measured from the same box the trigger's
+                are. Mounted here rather than at the screen level for that reason
+                alone — nothing about the tray belongs to the banner otherwise. */}
+            <AnimatePresence>
+              {trayOpen && (
+                <IconTray
+                  ref={trayRef}
+                  chosen={chosen}
+                  accent={accent}
+                  labelledBy={trayLabelId}
+                  onChoose={setChosen}
+                  onClose={() => {
+                    setTrayOpen(false)
+                    trayTriggerRef.current?.focus()
+                  }}
+                />
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="flex flex-col gap-8">
@@ -834,15 +1155,23 @@ function CommunityCreated({
       >
         {/* ---- Header ---- */}
         <motion.header variants={fadeBlurIn} className="flex w-full flex-col items-center gap-3">
-          <motion.div
+          {/* `ACTION`, not the community's accent — the same blue the form's
+              own header badge and its submit button wear.
+              The accent is the thing being created; this badge is the platform
+              telling you it worked. Dressing the confirmation in the user's own
+              colour made the two indistinguishable, and it also meant the one
+              element on the page whose job is to read as *system* changed hue
+              depending on a choice made two screens earlier.
+              A plain `div` now: the colour is a constant, so there is nothing
+              left for `animate` to animate. */}
+          <div
             className="flex size-12 shrink-0 items-center justify-center rounded-full text-white"
-            animate={{ backgroundColor: accent }}
-            transition={transitionSmooth}
+            style={{ backgroundColor: ACTION }}
           >
             <span className="[&>svg]:size-6">
               <CheckIcon />
             </span>
-          </motion.div>
+          </div>
           <div className="flex flex-col items-center gap-2 text-center">
             <h1
               className="font-sohne-breit text-[16px] leading-[1.2] tracking-[-0.32px] text-white"
@@ -889,12 +1218,38 @@ function CommunityCreated({
                 whileTap={{ scale: 0.98 }}
                 transition={transitionFast}
                 aria-label={copied ? COPY.created.copied : COPY.created.copy}
-                className="flex h-12 shrink-0 cursor-pointer items-center gap-2 rounded-[5px] px-5 text-[14px] leading-[1.25] tracking-[-0.28px] whitespace-nowrap text-white"
+                className="relative flex h-12 shrink-0 cursor-pointer items-center justify-center rounded-[5px] px-5 text-[14px] leading-[1.25] tracking-[-0.28px] whitespace-nowrap text-white"
                 style={{ backgroundColor: ACTION }}
               >
-                {/* `mode="wait"` for the same reason the submit button uses it:
-                    one line of box, two labels, no overlap. */}
-                <AnimatePresence mode="wait" initial={false}>
+                {/* The button holds its own width, because otherwise pressing it
+                    moves it. "Link copied" is wider than "Copy link", and the
+                    button is sized by its content, so the swap resized it — and
+                    the link field beside it is `flex-1`, so the whole row
+                    re-truncated on a click that was only ever meant to change a
+                    label. `mode="wait"` made it worse again: with the outgoing
+                    label unmounted before the incoming one arrives, the box
+                    collapsed to its bare padding in between.
+
+                    So: both states stacked in one grid cell, invisible, holding
+                    the box open at the wider of the two. Nothing here is
+                    measured or hard-coded — the sizer *is* the labels, so it
+                    cannot fall out of step with them. */}
+                <span aria-hidden className="invisible grid">
+                  <span className="col-start-1 row-start-1 flex items-center gap-2">
+                    <CopyIcon />
+                    {COPY.created.copy}
+                  </span>
+                  <span className="col-start-1 row-start-1 flex items-center gap-2">
+                    <CheckIcon />
+                    {COPY.created.copied}
+                  </span>
+                </span>
+
+                {/* Overlapping rather than waiting, now that the box is fixed
+                    and they can share it: the two labels cross-fade in place,
+                    which is the same morph the rest of the playground uses and
+                    leaves no frame with an empty button in it. */}
+                <AnimatePresence initial={false}>
                   <motion.span
                     key={copied ? 'copied' : 'idle'}
                     variants={fadeBlurIn}
@@ -902,7 +1257,7 @@ function CommunityCreated({
                     animate="visible"
                     exit="hidden"
                     transition={transitionFast}
-                    className="flex items-center gap-2"
+                    className="absolute inset-0 flex items-center justify-center gap-2"
                   >
                     {copied ? <CheckIcon /> : <CopyIcon />}
                     {copied ? COPY.created.copied : COPY.created.copy}
