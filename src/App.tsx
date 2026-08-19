@@ -1,11 +1,23 @@
 import { SoundProvider } from '@web-kits/audio/react'
 import { InterfaceKit } from 'interface-kit/react'
+import { DesktopOnly } from './components/DesktopOnly'
 import { PlaygroundSwitcher } from './components/PlaygroundSwitcher'
 import { SweepProvider } from './components/sweep'
 import { MASTER_VOLUME } from './lib/sound'
 import { usePlayground } from './playgrounds/usePlayground'
 
 export default function App() {
+  return (
+    // Outermost, above the hash router and the providers: on a narrow viewport
+    // nothing below this should mount at all. A playground that never renders
+    // costs no fonts, no canvas, and no audio graph on a phone.
+    <DesktopOnly>
+      <Playgrounds />
+    </DesktopOnly>
+  )
+}
+
+function Playgrounds() {
   const { active, setActiveId } = usePlayground()
   const { Component } = active
 
