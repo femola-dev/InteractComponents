@@ -194,6 +194,25 @@ export const GLYPH = '#210125'
 export const ACTION = '#1d2aaf'
 
 /**
+ * The premium fee notice — node 329:23393, the band that caps the submit button
+ * once a paid feature is picked.
+ *
+ * The only warm colour in a screen otherwise built from blue, black and grey,
+ * which is the whole job: this is the one thing on the form that costs money,
+ * and it should not look like the rest of it. `PREMIUM_INK` is the file's own
+ * near-black, and it sets the notice's type.
+ *
+ * The checkbox on the band is *not* the one the file draws for it — a
+ * dark disc at 60% — but `TickSquare`, the same control the access rows use.
+ * That is a deliberate departure: the design gives this band its own checkbox
+ * because it is a separate frame in Figma, but on the assembled page it is the
+ * third checkbox a reader meets, and the third one behaving like a new control
+ * costs more than the file's colour choice buys.
+ */
+export const PREMIUM = '#ffbb01'
+export const PREMIUM_INK = '#120d01'
+
+/**
  * The picker's palette — node 313:3178, twelve swatches in two rows of six.
  *
  * The hues are not the file's. All twelve of its ellipses are #ee2020, and that
@@ -426,6 +445,8 @@ export const COPY = {
   namePlaceholder: 'examples: full-time creators, storyteller collective etc.',
   accessLabel: 'Community access type',
   featuresLabel: 'Community features',
+  premiumNotice: 'Premium features attract $5/month fee. Check box to agree.',
+  premiumAgree: 'Agree to the $5/month premium fee',
   submit: 'Create community',
   submitted: 'Community created',
   restart: 'Restart onboarding',

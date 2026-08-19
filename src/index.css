@@ -607,6 +607,70 @@ body {
   }
 }
 
+/* Join Group's landing button — a magnetic pull toward the cursor, with a light
+   source that follows it.
+
+   Every tunable lives here rather than in the component, and the component reads
+   them back out with `getComputedStyle`. That is the point: these are the six
+   numbers anyone actually reaches for when the effect is too subtle or too much,
+   so they should be adjustable in one place without opening a TSX file — and
+   there is no second copy in JS that can drift out of step with this one.
+
+   Safe ranges, past which the effect stops reading as physics:
+     --magnetic-strength-x   4px – 10px    cursor pull
+     --magnetic-strength-y   2px – 6px     vertical give, deliberately less
+     --glow-size           120px – 220px   how large the light source reads
+     --glow-opacity         0.18 – 0.38    how much of it survives on the blue
+     --hover-duration       0.25s – 0.5s   how fast it answers the cursor */
+.magnetic-button {
+  --magnetic-strength-x: 7px;
+  --magnetic-strength-y: 4px;
+  --glow-size: 170px;
+  --glow-opacity: 0.28;
+  --hover-duration: 0.35s;
+
+  /* Written by GSAP. Unitless 0–100 for exactly the reason `.card-glow`'s are:
+     a custom property gives GSAP no unit to infer, and both `%` and `px` invite
+     it to guess — and to guess differently on the first tween than the tenth. */
+  --pointer-x: 50;
+  --pointer-y: 50;
+  --glow: 0;
+
+  position: relative;
+  /* Clips the light source to the button's own corners. Without it the gradient
+     is a square of haze sitting behind a rounded rectangle. */
+  overflow: hidden;
+}
+
+.magnetic-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: var(--glow);
+  /* Stops at 70% rather than 100% so the falloff finishes inside the button and
+     the far corners stay the flat action blue — a gradient that reaches every
+     edge reads as a lighter button, not as a light on one. */
+  background: radial-gradient(
+    circle var(--glow-size) at calc(var(--pointer-x) * 1%) calc(var(--pointer-y) * 1%),
+    rgba(255, 255, 255, var(--glow-opacity)),
+    rgba(255, 255, 255, 0) 70%
+  );
+}
+
+/* No cursor to be magnetic toward, or no appetite for motion. The glow is the
+   only thing that needs switching off by hand — the pull and the reset are
+   never bound in the first place. */
+@media (hover: none),
+(pointer: coarse),
+(prefers-reduced-motion: reduce) {
+  .magnetic-button::before {
+    display: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

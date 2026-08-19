@@ -55,6 +55,31 @@ export const springMorph: Transition = {
 }
 
 /**
+ * A panel changing state in place — the membership composer becoming its own
+ * receipt, and anything else where a box resizes while its contents swap.
+ *
+ * Critically damped by construction rather than by eye: ζ = c / 2√(km) =
+ * 46.5 / 2√(540 × 1) = 1.00. That is the exact boundary between overshoot and
+ * crawl, and the fastest a second-order system can reach its target *without
+ * passing it*, which is the entire requirement here — a box that overshoots its
+ * own height reads as jelly. Every spring in this file that is allowed to
+ * overshoot (`springPill`, `springOvershoot`) is small, or horizontal, or both.
+ *
+ * ωn = √(k/m) ≈ 23.2 rad/s puts the 2% settle at 5.8/ωn ≈ 0.25s, so the height
+ * arrives just as the crossfade underneath it finishes rather than after it.
+ *
+ * Worth naming explicitly wherever `layout` is used: Framer's own default
+ * layout transition sits near ζ ≈ 0.55, which is visibly springy on a surface
+ * of any size.
+ */
+export const springSnap: Transition = {
+  type: 'spring',
+  stiffness: 540,
+  damping: 46.5,
+  mass: 1,
+}
+
+/**
  * A small pill snapping open into a wider one — the bottom switcher's hover
  * morph, and anything else where the shape change *is* the interaction.
  *
@@ -310,6 +335,39 @@ export const tooltipIn: Variants = {
     transition: transitionFast,
   },
 }
+
+/**
+ * Blur morph: one surface becoming a different surface in the same place.
+ *
+ * Not a crossfade with blur bolted on. A plain opacity dissolve puts both
+ * states on screen at 50% for a moment and the eye reads it as two things
+ * overlapping — text over text, edges over edges. Blurring each state as it
+ * leaves and unblurring the one arriving destroys the high-frequency detail
+ * exactly while both are visible, so the midpoint has nothing legible to
+ * double up. What survives is the low-frequency shape, which is the part that
+ * is actually shared between the two states — and that reads as one surface
+ * changing rather than two surfaces swapping.
+ *
+ * Symmetric on purpose: same duration, same easing, same 6px both directions,
+ * so at t = 0.5 the two states are exact complements — 50% opacity and 3px of
+ * blur each. Any asymmetry here shows up as a visible "dip" where the box is
+ * momentarily empty.
+ *
+ * 6px is scaled to 13px type: enough that a glyph loses its identity, little
+ * enough that a 32px button keeps its silhouette. The 0.985 scale is doing
+ * almost nothing on its own — it exists so the blur has a direction.
+ *
+ * Spread onto both branches of an `AnimatePresence` and let the parent's
+ * `layout` (see `springSnap`) carry the height. Use `mode="popLayout"` so the
+ * outgoing copy leaves the flow immediately and the box starts resizing to the
+ * incoming one on frame one, rather than waiting for the exit to finish.
+ */
+export const blurMorph = {
+  initial: { opacity: 0, filter: 'blur(6px)', scale: 0.985 },
+  animate: { opacity: 1, filter: 'blur(0px)', scale: 1 },
+  exit: { opacity: 0, filter: 'blur(6px)', scale: 0.985 },
+  transition: { duration: 0.24, ease: ease.smooth },
+} as const
 
 /** Press feedback for any tappable element. 0.98, not 0.9 — a firm press,
  *  not a collapse. Spread this onto motion.button/div via whileTap. */

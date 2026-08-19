@@ -9,6 +9,8 @@ import {
   type Ref,
 } from 'react'
 import { AnimatePresence, motion, type Variants } from 'framer-motion'
+import { gsap } from 'gsap'
+import { springStep, type SpringState } from '../lib/spring'
 import { transitionFast, transitionSmooth, fadeBlurIn } from '../lib/motion'
 import { SweepCanvas } from '../components/sweep'
 import { useSweep } from '../components/sweep-context'
@@ -26,6 +28,8 @@ import {
   COMMUNITY_ICONS,
   COPY,
   GLYPH,
+  PREMIUM,
+  PREMIUM_INK,
   DEFAULT_ACCENT,
   DIM,
   EDGE,
@@ -209,7 +213,189 @@ function Backdrop({ spec }: { spec: BackdropSpec }) {
  * the two are indistinguishable, and `filter` is already spoken for by the
  * entrance — animating it would blow the shadow away mid-transition.
  */
+/**
+ * The Get Started button's hover roll — two faces on a turning axis.
+ *
+ * `CUBE_RADIUS` is the only number that matters, and it is the button's own
+ * half-height plus the gap. At `BUTTON_H / 2` exactly the two faces would share
+ * an edge and the thing turning would be a cube; pushing both out by
+ * `CUBE_GAP` parts them, so the copy waits 8px clear of the resting button's
+ * bottom edge and the leaving face clears the arriving one by the same 8px on
+ * its way up. Symmetric by construction — the gap is a property of the radius,
+ * not two offsets that have to be kept in step.
+ *
+ * The assembly is then pushed `CUBE_RADIUS` *back*, so the resting face lands
+ * exactly on the screen plane: the button is the same size hovered or not,
+ * which it would not be if the front face sat 49.5px nearer the lens than
+ * everything else on the page.
+ */
+const BUTTON_H = 83
+/** Air between the face leaving and the face arriving. */
+const CUBE_GAP = 8
+const CUBE_RADIUS = BUTTON_H / 2 + CUBE_GAP
+/**
+ * Roughly eleven times the button's height. Shallow enough that the roll has
+ * real depth — the leaving face visibly recedes rather than just squashing —
+ * and long enough that the near edge does not bow outward on the way past.
+ */
+const CUBE_PERSPECTIVE = 900
+
+/**
+ * The roll's physics — a damped harmonic oscillator on the angle, solved rather
+ * than eased.
+ *
+ * `springStep` evaluates the closed form of `angle'' + 2zw*angle' + w^2(angle -
+ * 90) = 0` at `t = dt`, so this is not an easing curve shaped to look like
+ * motion; it is the motion, and the numbers below mean what they say. Two
+ * consequences a tween cannot offer: it is frame-rate independent *exactly*
+ * rather than approximately, and it cannot blow up on a long frame — which is
+ * why nothing here clamps `dt`, where an explicit integrator on a spring this
+ * stiff would diverge the moment a frame ran past `2/w` = 100ms.
+ *
+ * The impulse is what makes it snappy rather than merely quick. Released from
+ * rest the spring does all the work and the face *eases away*; launched at
+ * 900 deg/s — two and a half turns a second — the face is struck and the
+ * spring's job is to catch it. Simulated at 240Hz, this pairing reaches the new
+ * face in 121ms, carries 6.8 degrees past it, and is done rocking at 487ms.
+ *
+ * The damping ratio is the only thing that sets the overshoot, and it sets it
+ * in closed form: `exp(-pi*z / sqrt(1 - z^2))`, which at 0.66 is 7.6% of the
+ * 90 degree travel. Below about 0.55 it visibly bounces twice and reads as a
+ * loose hinge; above 0.8 the overshoot is under 1.5 degrees and the roll goes
+ * back to looking eased.
+ */
+const ROLL_FREQUENCY = 2 * Math.PI * 3.2
+const ROLL_DAMPING = 0.66
+const ROLL_IMPULSE = 900
+/** Done when it is within a twentieth of a degree *and* has stopped moving —
+ *  both, because either alone is true at the top of every overshoot. */
+const ROLL_SETTLED = 0.05
+const ROLL_STILL = 2
+
+/**
+ * The entrance, without `fadeBlurIn`'s blur.
+ *
+ * Not a style preference — a `filter` of any value other than `none` makes an
+ * element flatten its descendants into a single plane, and framer leaves
+ * `filter: blur(0px)` on the element after the animation settles. Keeping the
+ * house variant here would have quietly turned the cube into a flat card that
+ * squashes instead of rolling, with nothing in the CSS to point at.
+ */
+const fadeRiseIn: Variants = {
+  hidden: { opacity: 0, y: 6 },
+  visible: { opacity: 1, y: 0, transition: transitionSmooth },
+}
+
 function Landing({ onStart }: { onStart: () => void }) {
+  const cubeRef = useRef<HTMLSpanElement>(null)
+
+  /**
+   * One roll per hover.
+   *
+   * GSAP drives the frame and the DOM write; the physics is `lib/spring.ts`.
+   * `quickSetter` rather than a tween, because there is no tween here to
+   * describe — the angle is integrated each frame from the spring's own state,
+   * and all GSAP has to do is put the number on the element. Same division of
+   * labour the Writers Garden helix uses, for the same reason.
+   *
+   * The reset is what keeps two faces sufficient: the cube can turn 90 degrees
+   * and no further, so on arrival it snaps back to zero — invisible, because the
+   * face that just landed is a copy of the one that left, and "identical" is the
+   * whole premise. Every hover is therefore the same quarter turn from the same
+   * place, with no four-sided cube and no running total of where it got to.
+   */
+  useEffect(() => {
+    const cube = cubeRef.current
+    if (!cube) return
+
+    // No hover to speak of on a touch screen — `pointerenter` fires on tap
+    // there, which would roll the button as it is being pressed. And under
+    // reduced motion this is exactly the kind of unrequested movement the query
+    // is for: the button still works, it simply does not turn.
+    const fine = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (!fine.matches || reduced.matches) return
+
+    const parent = cube.parentElement
+    if (!parent) return
+
+    gsap.set(cube, { transformStyle: 'preserve-3d', z: -CUBE_RADIUS })
+    const setAngle = gsap.quickSetter(cube, 'rotationX', 'deg') as (v: number) => void
+
+    const spin: SpringState = { x: 0, v: 0 }
+    let rolling = false
+
+    const stop = () => {
+      gsap.ticker.remove(frame)
+      setAngle(0)
+      spin.x = 0
+      spin.v = 0
+      rolling = false
+    }
+
+    function frame(_time: number, deltaMs: number) {
+      // No clamp: the solver is exact at any step and unconditionally stable,
+      // which is the entire reason it is a solution and not an integrator.
+      springStep(spin, 90, ROLL_FREQUENCY, ROLL_DAMPING, deltaMs / 1000)
+      if (Math.abs(spin.x - 90) < ROLL_SETTLED && Math.abs(spin.v) < ROLL_STILL) {
+        stop()
+        return
+      }
+      setAngle(spin.x)
+    }
+
+    const roll = () => {
+      if (rolling) return
+      rolling = true
+      spin.x = 0
+      spin.v = ROLL_IMPULSE
+      gsap.ticker.add(frame)
+    }
+
+    parent.addEventListener('pointerenter', roll)
+    return () => {
+      parent.removeEventListener('pointerenter', roll)
+      gsap.ticker.remove(frame)
+    }
+  }, [])
+
+  /* Both faces are the same markup, so the copy that rolls up from underneath is
+     a copy in the strict sense rather than something maintained twice. */
+  const face = (
+    <>
+      <img src={iconRocket} alt="" className="size-8 shrink-0" />
+      {/* The file sets this in Test Söhne Kräftig — normal width. The only
+          bold Söhne cut in the project is Breit, which is the *extended*
+          family and renders this label visibly wider than the design. So
+          this asks the regular cut for weight 600 and takes the browser's
+          synthetic bold: wrong weight rendering, right letterforms and
+          widths, which is the closer of the two misses. Drop
+          TestSohne-Kräftig into src/assets/fonts and this becomes real. */}
+      <span
+        // Tracking follows the size. The file holds a flat -0.02em at every
+        // size — the note at the top of this component spells that out — so
+        // 24px takes -0.48px where 16px took -0.32.
+        // 8px on the trailing edge only. The faces centre their content as one
+        // group, so padding one side of the label shifts the whole group the
+        // other way — icon and label both move 4px left, and the button ends up
+        // weighted exactly as the file drew it, where `pr-7 pl-6` carried more
+        // room on the right than the left for the same reason. Symmetric
+        // padding would have left the group centred and merely opened the gap.
+        className="font-sohne pr-2 text-2xl leading-[1.3] font-semibold tracking-[-0.48px] whitespace-nowrap text-white"
+        style={SALT}
+      >
+        {COPY.getStarted}
+      </span>
+    </>
+  )
+
+  const faceClass =
+    'absolute inset-0 flex items-center justify-center gap-3 rounded-[5px] [backface-visibility:hidden]'
+  const faceStyle: CSSProperties = {
+    backgroundColor: ACTION,
+    boxShadow: '0 0 16px rgba(0,0,0,0.32)',
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -220,29 +406,38 @@ function Landing({ onStart }: { onStart: () => void }) {
     >
       <Backdrop spec={LANDING_BACKDROP} />
 
+      {/* The button itself is now just the box and the lens — no fill, because
+          the fill belongs to the faces that turn. Deliberately not
+          `overflow-hidden`: a rolling cube leaves its own box, and clipping it
+          to the resting rectangle is what makes this read as a flip card rather
+          than as an object with sides. */}
       <motion.button
         type="button"
         onClick={onStart}
-        variants={fadeBlurIn}
+        variants={fadeRiseIn}
         initial="hidden"
         animate="visible"
         whileTap={{ scale: 0.98 }}
-        className="relative flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-[5px] py-4 pr-7 pl-6"
-        style={{ backgroundColor: ACTION, boxShadow: '0 0 16px rgba(0,0,0,0.32)' }}
+        className="relative h-[83px] w-74 shrink-0 cursor-pointer rounded-[5px] text-2xl"
+        style={{ perspective: CUBE_PERSPECTIVE }}
       >
-        <img src={iconRocket} alt="" className="size-5 shrink-0" />
-        {/* The file sets this in Test Söhne Kräftig — normal width. The only
-            bold Söhne cut in the project is Breit, which is the *extended*
-            family and renders this label visibly wider than the design. So
-            this asks the regular cut for weight 600 and takes the browser's
-            synthetic bold: wrong weight rendering, right letterforms and
-            widths, which is the closer of the two misses. Drop
-            TestSohne-Kräftig into src/assets/fonts and this becomes real. */}
-        <span
-          className="font-sohne text-[16px] leading-[1.3] font-semibold tracking-[-0.32px] whitespace-nowrap text-white"
-          style={SALT}
-        >
-          {COPY.getStarted}
+        <span ref={cubeRef} className="absolute inset-0 block">
+          {/* The resting face, level with the screen once the cube's own
+              setback is applied. */}
+          <span className={faceClass} style={{ ...faceStyle, transform: `translateZ(${CUBE_RADIUS}px)` }}>
+            {face}
+          </span>
+          {/* The copy, lying face-down along the bottom edge — `rotateX(-90deg)`
+              points its own +Z straight down, so `translateZ` carries it under
+              the button rather than toward the viewer. A 90° turn of the cube
+              brings it up to where the first one was. */}
+          <span
+            aria-hidden
+            className={faceClass}
+            style={{ ...faceStyle, transform: `rotateX(-90deg) translateZ(${CUBE_RADIUS}px)` }}
+          >
+            {face}
+          </span>
         </span>
       </motion.button>
     </motion.div>
@@ -262,7 +457,6 @@ type FieldProps = {
   gap?: string
 }
 
-/** A labelled section of the form: label, air, then the control. */
 function Field({ label, children, gap = 'gap-4' }: FieldProps) {
   return (
     <div className={cn('flex flex-col', gap)}>
@@ -432,6 +626,30 @@ type AccessRowProps = {
 }
 
 /**
+ * The page's checkbox — the access rows' and the premium band's, one component.
+ *
+ * Two stacked exports rather than one that swaps: the "off" disc stays put and
+ * the "on" one fades over it, so the state change is a cross-fade in place with
+ * nothing reflowing underneath. Swapping `src` would flash white for a frame on
+ * a cold cache, which is exactly the frame anybody is looking at.
+ */
+function TickSquare({ on }: { on: boolean }) {
+  return (
+    <span className="relative size-4 shrink-0">
+      <img src={iconTickOff} alt="" className="absolute inset-0 size-full" />
+      <motion.img
+        src={iconTickOn}
+        alt=""
+        initial={false}
+        animate={{ opacity: on ? 1 : 0 }}
+        transition={transitionFast}
+        className="absolute inset-0 size-full"
+      />
+    </span>
+  )
+}
+
+/**
  * One access mode. The tick is two stacked exports cross-faded rather than one
  * recoloured glyph — the on state is a filled blue square with a white check
  * and the off state is an empty grey outline, so they are different drawings,
@@ -460,17 +678,7 @@ function AccessRow({ option, selected, onSelect }: AccessRowProps) {
           {option.detail}
         </span>
       </span>
-      <span className="relative size-4 shrink-0">
-        <img src={iconTickOff} alt="" className="absolute inset-0 size-full" />
-        <motion.img
-          src={iconTickOn}
-          alt=""
-          initial={false}
-          animate={{ opacity: selected ? 1 : 0 }}
-          transition={transitionFast}
-          className="absolute inset-0 size-full"
-        />
-      </span>
+      <TickSquare on={selected} />
     </button>
   )
 }
@@ -810,12 +1018,26 @@ function CommunityForm({
   const toggle = (id: string) =>
     setPicked(prev => (prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]))
 
+  /* Node 329:23393. Picking anything paid puts a price on the form, and a price
+     needs consent — so the band appears, and the submit button will not fire
+     until the box on it is ticked. */
+  const premiumPicked = picked.some(id => FEATURES.find(f => f.id === id)?.premium)
+  const [agreed, setAgreed] = useState(false)
+  const blocked = premiumPicked && !agreed
+
+  /* Deselecting the last paid feature withdraws the question, so it also has to
+     withdraw the answer — otherwise a consent given once silently stands for a
+     charge picked again later, which is not what anybody agreed to. */
+  useEffect(() => {
+    if (!premiumPicked) setAgreed(false)
+  }, [premiumPicked])
+
   /* The label flips and stays flipped: the screen is already leaving under the
      sweep, and a button that says "Create community" again on its way out reads
      as the click having been undone. `created` is also the guard against a
      second submit landing mid-transition. */
   const submit = () => {
-    if (created) return
+    if (created || blocked) return
     setCreated(true)
     onCreate({ name, accent })
   }
@@ -871,11 +1093,11 @@ function CommunityForm({
         {/* ---- The form ---- */}
         <motion.div
           variants={fadeBlurIn}
-          className="flex w-full flex-col gap-10 rounded-[10px] p-6"
+          className="flex w-full flex-col gap-12 rounded-[10px] p-6"
           style={{ backgroundColor: CARD }}
         >
           {/* Banner. 85px tall with a 50px avatar dropped at y=55, so 20px of it
-              hangs into the 40px gap below — that overhang is the composition,
+              hangs into the 48px gap below — that overhang is the composition,
               and clipping it would sit the avatar in a box. */}
           <div className="relative h-[85px] shrink-0">
             <motion.div
@@ -977,7 +1199,7 @@ function CommunityForm({
                   onChange={event => setName(event.target.value)}
                   placeholder={COPY.namePlaceholder}
                   aria-label={COPY.nameLabel}
-                  className="min-w-0 flex-1 bg-transparent text-[14px] leading-[1.25] tracking-[-0.28px] text-white outline-none placeholder:text-[#898989]"
+                  className="min-w-0 flex-1 bg-transparent text-[14px] leading-[1.25] tracking-[-0.28px] text-white outline-none placeholder:text-[#575757]"
                 />
               </div>
             </Field>
@@ -1019,14 +1241,63 @@ function CommunityForm({
             </Field>
           </div>
 
-          <motion.button
-            type="button"
-            onClick={submit}
-            whileTap={{ scale: 0.98 }}
-            transition={transitionFast}
-            className="flex h-[47px] w-full shrink-0 cursor-pointer items-center justify-center rounded-[5px] px-6 text-[14px] leading-[1.25] tracking-[-0.28px] text-white"
-            style={{ backgroundColor: ACTION }}
-          >
+          {/* Node 329:23393 — the fee band, and the button it caps.
+              One column with no gap, so the band sits *on* the button rather
+              than near it: the two are one control, and the price is not a note
+              beside the thing you are buying. The band hugs its own content and
+              centres, so the button's own rounded corners are never covered. */}
+          <div className="flex w-full shrink-0 flex-col items-center">
+            <AnimatePresence initial={false}>
+              {premiumPicked && (
+                <motion.div
+                  key="fee"
+                  /* Height rather than opacity alone: the band has to make room
+                     for itself, and the design already clips its own overflow —
+                     which is exactly what an auto-height animation needs. */
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={transitionSmooth}
+                  className="overflow-clip rounded-t-[5px]"
+                  style={{ backgroundColor: PREMIUM }}
+                >
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={agreed}
+                    aria-label={COPY.premiumAgree}
+                    onClick={() => setAgreed(a => !a)}
+                    className="flex cursor-pointer items-center justify-center gap-1 px-2 pt-1.5 pb-1"
+                  >
+                    <TickSquare on={agreed} />
+                    <span
+                      className="text-center text-[12px] leading-[1.0008] tracking-[-0.24px] whitespace-nowrap"
+                      style={{ color: PREMIUM_INK }}
+                    >
+                      {COPY.premiumNotice}
+                    </span>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <motion.button
+              type="button"
+              onClick={submit}
+              whileTap={blocked ? undefined : { scale: 0.98 }}
+              transition={transitionFast}
+              /* `aria-disabled`, not `disabled`: the button stays focusable and
+                 keeps announcing its name, so somebody arriving on it by keyboard
+                 is told it is unavailable instead of finding it skipped with no
+                 explanation. `submit` does the actual refusing. */
+              aria-disabled={blocked}
+              className="flex h-[47px] w-full shrink-0 items-center justify-center rounded-[5px] px-6 text-[14px] leading-[1.25] tracking-[-0.28px] text-white transition-opacity"
+              style={{
+                backgroundColor: ACTION,
+                opacity: blocked ? 0.55 : 1,
+                cursor: blocked ? 'not-allowed' : 'pointer',
+              }}
+            >
             {/* `mode="wait"` so the two labels never overlap in a box that is
                 exactly one line tall. */}
             <AnimatePresence mode="wait" initial={false}>
@@ -1039,9 +1310,10 @@ function CommunityForm({
                 transition={transitionFast}
               >
                 {created ? COPY.submitted : COPY.submit}
-              </motion.span>
-            </AnimatePresence>
-          </motion.button>
+                </motion.span>
+              </AnimatePresence>
+            </motion.button>
+          </div>
         </motion.div>
 
         {/* ---- Restart ---- */}

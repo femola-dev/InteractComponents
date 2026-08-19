@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useRise } from '../components/rise'
-import { transitionFast } from '../lib/motion'
+import { blurMorph, springSnap, transitionFast } from '../lib/motion'
 import { lighten } from '../lib/color'
 import { MEMBERS, TIERS, COMPANY_LOGOS, COMPANY_NAMES } from '../lib/members'
 import type { TierId, CompanyId, Member } from '../lib/members'
@@ -16,6 +17,7 @@ import iconMagicWandInactive from '../assets/icons/inactive_magic-wand-2.svg'
 import iconGroup3Active from '../assets/icons/active_group-3.svg'
 import iconGroup3Inactive from '../assets/icons/inactive_group-3.svg'
 import iconGroup3Dark from '../assets/icons/group-3-dark.svg'
+import iconGroup3Muted from '../assets/icons/group-3-muted.svg'
 import iconWorldActive from '../assets/icons/active_world.svg'
 import iconWorldInactive from '../assets/icons/inactive_world.svg'
 import iconChart6Active from '../assets/icons/active_chart-6.svg'
@@ -392,11 +394,236 @@ function MemberRow({ member, checked, onToggle, onNameHoverStart, onNameHoverMov
   )
 }
 
+type Verdict = 'accepted' | 'rejected'
+
+/** A verdict that has been sent but is still inside its revert window — holds
+ *  everything needed to put the table back exactly as it was. */
+type PendingVerdict = { id: number; verdict: Verdict; count: number; message: string; ids: Set<number> }
+
+/* Raised-button treatment shared by the bulk-action buttons: an outer lift
+   plus an inner bevel, same recipe as the sidebar's "New" badge. */
+const ACTION_BUTTON_SHADOW = '0px 0px 1.521px 0px rgba(30,62,126,0.2), 0px 0.254px 0.507px 0px rgba(0,0,0,0.2)'
+const ACTION_BUTTON_BEVEL = 'inset 0px -0.22px 0.394px 0px rgba(0,0,0,0.2), inset 0px 0.254px 0.254px 0px rgba(255,255,255,0.35), inset 0px 0px 1.013px 0px rgba(255,255,255,0.25)'
+
+/** `drainSeconds` renders a fill that empties left-to-right over that many
+ *  seconds — a spatial read of a countdown to pair with the numeric one.
+ *  `width` omitted means the button sizes to its label instead of the
+ *  design's fixed 90px. */
+function ActionButton({ label, color, onClick, width = 90, trailing, drainSeconds }: { label: string; color: string; onClick: () => void; width?: number | null; trailing?: ReactNode; drainSeconds?: number }) {
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      whileTap={{ scale: 0.96 }}
+      transition={transitionFast}
+      className={`relative flex h-[32px] shrink-0 cursor-pointer items-center justify-center gap-[6px] overflow-hidden rounded-[8px] ${width == null ? 'px-[16px]' : ''}`}
+      style={{ backgroundColor: color, boxShadow: ACTION_BUTTON_SHADOW, width: width ?? undefined }}
+    >
+      {drainSeconds != null && (
+        <motion.span
+          aria-hidden
+          className="absolute inset-y-0 left-0 w-full origin-left bg-white/20"
+          initial={{ scaleX: 1 }}
+          animate={{ scaleX: 0 }}
+          transition={{ duration: drainSeconds, ease: 'linear' }}
+        />
+      )}
+      <span
+        className="relative text-[13px] font-medium text-white whitespace-nowrap tracking-[-0.13px] leading-[18px]"
+        style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"dlig" 1' }}
+      >
+        {label}
+      </span>
+      {trailing}
+      <span aria-hidden className="absolute inset-0 rounded-[inherit]" style={{ boxShadow: ACTION_BUTTON_BEVEL }} />
+    </motion.button>
+  )
+}
+
+/** How long a verdict stays reversible before it commits. */
+const REVERT_WINDOW_SECONDS = 10
+
+const VERDICT_COLOR: Record<Verdict, string> = { accepted: '#02320f', rejected: '#da0000' }
+
+/** The white field's receipt state — what was sent, and to how many. The
+ *  verdict isn't final while this is up; see `RevertButton`. */
+function ReceiptBody({ pending }: { pending: PendingVerdict }) {
+  const memberLabel = pending.count === 1 ? 'member' : 'members'
+
+  return (
+    <div className="flex flex-col gap-[4px] rounded-[6px] bg-white px-[8px] py-[8px]" role="status" aria-live="polite">
+      <div className="flex items-center gap-[6px]">
+        <span aria-hidden className="size-[8px] shrink-0 rounded-full" style={{ backgroundColor: VERDICT_COLOR[pending.verdict] }} />
+        <span
+          className="text-[13px] font-semibold text-[#1c221d] tracking-[-0.13px] leading-[18px]"
+          style={{ fontFamily: "'Inter Display', sans-serif", ...INTER_FEATURES }}
+        >
+          {pending.count} {memberLabel} {pending.verdict}
+        </span>
+      </div>
+      <span
+        className="truncate text-[13px] text-[#878f88] tracking-[-0.13px] leading-[18px]"
+        style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"dlig" 1' }}
+      >
+        {pending.message ? `“${pending.message}”` : 'No message sent'}
+      </span>
+    </div>
+  )
+}
+
+/** Green revert affordance plus the window it lives in: the fill drains and the
+ *  seconds count down together, and expiry commits the verdict. */
+function RevertButton({ onRevert, onExpire }: { onRevert: () => void; onExpire: () => void }) {
+  const [remaining, setRemaining] = useState(REVERT_WINDOW_SECONDS)
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setRemaining(r => Math.max(0, r - 1)), 1000)
+    const commit = window.setTimeout(onExpire, REVERT_WINDOW_SECONDS * 1000)
+    return () => {
+      window.clearInterval(tick)
+      window.clearTimeout(commit)
+    }
+  }, [onExpire])
+
+  return (
+    <ActionButton
+      label="Revert changes"
+      color="#0a9c4b"
+      width={null}
+      onClick={onRevert}
+      drainSeconds={REVERT_WINDOW_SECONDS}
+      trailing={
+        <span
+          className="relative text-[13px] font-semibold text-white/75 tabular-nums leading-[18px]"
+          style={{ fontFamily: "'Inter Display', sans-serif" }}
+        >
+          {remaining}s
+        </span>
+      }
+    />
+  )
+}
+
+/** Left-hand chip in the panel footer — icon plus however many rows are in play. */
+function SelectionCount({ count }: { count: number }) {
+  return (
+    <div className="flex h-[32px] shrink-0 items-center gap-[4px] overflow-hidden rounded-[8px] p-[4px]">
+      <img src={iconGroup3Muted} alt="" className="size-[16px] shrink-0" />
+      <span
+        className="text-[13px] font-semibold text-[#878f88] whitespace-nowrap tracking-[-0.13px] leading-[18px] tabular-nums"
+        style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"dlig" 1' }}
+      >
+        {count}
+      </span>
+    </div>
+  )
+}
+
+/** Width of the verdict pair (90 + 4 + 90). The action slot is pinned to it so
+ *  the narrower revert button swaps in without the footer reflowing. */
+const ACTION_SLOT_WIDTH = 184
+
+/** Bulk-action composer (Figma 332:4525). Springs up over the table area the
+ *  moment the first member is checked and stays for as long as anything is
+ *  selected, so a verdict on the selection is always within reach — no toolbar
+ *  hunting. Accepted/Rejected apply to the whole selection and clear it;
+ *  ⌘/Ctrl+Enter accepts, Escape drops the selection. The message is optional,
+ *  so the buttons are never blocked on typing.
+ *
+ *  Geometry is 1:1 with the frame: 433px shell, 2px inset around the 104px
+ *  white field, then a 32px footer row inset a further 2px — selection count
+ *  on the left, verdict buttons on the right.
+ *
+ *  The same shell carries the post-send receipt, and only the two parts that
+ *  actually differ morph: the white field, and the action slot. The shell, the
+ *  footer row, and the count chip are one continuous element across both
+ *  states — nothing that stays the same is allowed to animate. */
+function BulkComposePanel({ count, pending, onDecision, onRevert, onCommit, onDismiss }: { count: number; pending: PendingVerdict | null; onDecision: (verdict: Verdict, message: string) => void; onRevert: () => void; onCommit: () => void; onDismiss: () => void }) {
+  const [message, setMessage] = useState('')
+
+  const decide = (verdict: Verdict) => {
+    onDecision(verdict, message.trim())
+  }
+
+  return (
+    /* Alignment layer spans the whole table region but stays click-through, so
+       rows behind the panel remain selectable while it's open. Horizontally
+       centered, bottom-aligned with 72px of clearance. */
+    <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center px-[16px] pb-[72px]">
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.98 }}
+        transition={springSnap}
+        layout
+        className="pointer-events-auto flex w-[433px] max-w-full flex-col gap-[4px] overflow-hidden rounded-[8px] bg-[#f1f1f1] p-[2px]"
+        style={{ boxShadow: `${ACTION_BUTTON_SHADOW}, ${ACTION_BUTTON_BEVEL}` }}
+      >
+        {/* Field. `popLayout` drops the outgoing copy out of flow on frame one,
+            so the shell starts resizing to the incoming height immediately
+            instead of waiting out the exit — the blur morph and the height
+            spring then run as a single 0.25s move. */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          {pending ? (
+            <motion.div key="receipt" {...blurMorph}>
+              <ReceiptBody pending={pending} />
+            </motion.div>
+          ) : (
+            <motion.textarea
+              key="compose"
+              {...blurMorph}
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  onDismiss()
+                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  decide('accepted')
+                }
+              }}
+              placeholder={count === 1 ? 'Compose message to selected member...' : 'Compose message to selected members...'}
+              aria-label="Message to selected members"
+              className="h-[104px] w-full resize-none rounded-[6px] bg-white px-[8px] py-[8px] text-[13px] text-[#1c221d] outline-none placeholder:text-[#878f88]"
+              style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"dlig" 1', letterSpacing: '-0.13px', lineHeight: '18px' }}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Footer row is shared, so it never animates. The count chip holds the
+            pending total while a receipt is up, which keeps the one number
+            that's true in both states from flickering. */}
+        <div className="flex items-center justify-between px-[2px] pb-[2px]">
+          <SelectionCount count={pending ? pending.count : count} />
+          <div className="relative h-[32px] shrink-0" style={{ width: ACTION_SLOT_WIDTH }}>
+            <AnimatePresence initial={false}>
+              {pending ? (
+                <motion.div key="revert" {...blurMorph} className="absolute right-0 top-0">
+                  <RevertButton onRevert={onRevert} onExpire={onCommit} />
+                </motion.div>
+              ) : (
+                <motion.div key="verdict" {...blurMorph} className="absolute right-0 top-0 flex items-center gap-[4px]">
+                  <ActionButton label="Rejected" color="#da0000" onClick={() => decide('rejected')} />
+                  <ActionButton label="Accepted" color="#02320f" onClick={() => decide('accepted')} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+
 const PAGE_SIZES = [10, 15, 25, 50] as const
 
 export function MembershipDashboard() {
   const [collapsed, setCollapsed] = useState(false)
   const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [pending, setPending] = useState<PendingVerdict | null>(null)
+  const verdictSeq = useRef(0)
   const [activeNav, setActiveNav] = useState('Membership')
   const [hoveredNav, setHoveredNav] = useState<string | null>(null)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
@@ -417,6 +644,7 @@ export function MembershipDashboard() {
   const rise = useRise()
 
   const toggleChecked = useCallback((id: number) => {
+    setPending(null)
     setChecked(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -529,6 +757,27 @@ export function MembershipDashboard() {
   }, [allOnPageChecked, pageMembers])
 
   const selectedCount = checked.size
+
+  const clearChecked = useCallback(() => setChecked(new Set()), [])
+
+  /* A verdict clears the selection immediately but stays reversible for
+     REVERT_WINDOW_SECONDS — `pending` holds the ids so revert can put the
+     table back exactly as it was. No status field exists on a member yet, so
+     committing is just letting the receipt go. */
+  const handleBulkDecision = useCallback((verdict: Verdict, message: string) => {
+    verdictSeq.current += 1
+    setPending({ id: verdictSeq.current, verdict, count: checked.size, message, ids: checked })
+    setChecked(new Set())
+  }, [checked])
+
+  const revertVerdict = useCallback(() => {
+    setPending(prev => {
+      if (prev) setChecked(prev.ids)
+      return null
+    })
+  }, [])
+
+  const commitVerdict = useCallback(() => setPending(null), [])
 
   // `staticIcon` columns (Date joined) sort chronologically, not
   // alphabetically — the A/Z ascending/descending glyphs don't apply, so the
@@ -733,7 +982,7 @@ export function MembershipDashboard() {
         </div>
 
         {/* Table */}
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 flex-1 flex-col">
           {/* Column headers */}
           <div className="relative flex h-[clamp(30px,4cqw,36px)] shrink-0 items-center bg-white" style={{ boxShadow: '0px 2px 2px 0px rgba(0,0,0,0.08), 0px 0px 0px 0.5px rgba(0,0,0,0.12)' }}>
             <div className={`flex shrink-0 items-center ${COL.check} pl-[clamp(12px,1.5cqw,16px)]`}>
@@ -799,6 +1048,19 @@ export function MembershipDashboard() {
               ))}
             </div>
           </div>
+
+          <AnimatePresence>
+            {(selectedCount > 0 || pending) && (
+              <BulkComposePanel
+                count={selectedCount}
+                pending={pending}
+                onDecision={handleBulkDecision}
+                onRevert={revertVerdict}
+                onCommit={commitVerdict}
+                onDismiss={clearChecked}
+              />
+            )}
+          </AnimatePresence>
 
           {/* Footer / pagination */}
           <div className="flex h-[clamp(40px,5cqw,44px)] shrink-0 items-center justify-between border-t border-[#dfdfdf] bg-white px-[clamp(12px,1.5cqw,16px)]">
