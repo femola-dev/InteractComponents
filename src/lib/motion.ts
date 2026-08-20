@@ -80,6 +80,61 @@ export const springSnap: Transition = {
 }
 
 /**
+ * A rail travelling between two widths — the membership dashboard's sidebar
+ * minimising and maximising.
+ *
+ * `SpringOptions`, not `Transition`, and that is the point of it. A `Transition`
+ * spring on an `animate` prop is re-solved from the value's current position
+ * every time the target changes; a `useSpring` integrates one continuous state,
+ * so velocity survives a new target. Double-click the collapse control and the
+ * rail turns around carrying the speed it already had, instead of stopping dead
+ * and restarting — which is the difference between a control with mass and two
+ * animations queued back to back.
+ *
+ * Snappy by construction rather than by eye. ωn = √(k/m) = √2100 ≈ 45.8 rad/s
+ * and ζ = c / 2√(km) = 62 / 2√2100 ≈ 0.68, which puts:
+ *
+ *   - peak at tp = π/ωn√(1-ζ²) ≈ 93ms — the edge is *past* its target by then
+ *   - overshoot at e^(-πζ/√(1-ζ²)) ≈ 5.6%, about 9px on the 167px travel
+ *   - settled (2%) at 4/ζωn ≈ 130ms
+ *
+ * Two things are doing the work, and they are independent — which is worth
+ * knowing before reaching for either.
+ *
+ * **ωn is the speed.** It is the only knob that makes this arrive sooner, and
+ * both times above scale as 1/ωn. Raising it is what took this from a 160ms
+ * peak to a 93ms one. Past ωn ≈ 55 the whole travel fits inside about four
+ * frames and the rail stops reading as a thing that moved — it reads as a cut,
+ * and then the only motion left on screen is the overshoot coming back, which
+ * looks like a glitch rather than a settle.
+ *
+ * **ζ is the snap.** The overshoot is what separates snappy from merely fast:
+ * `springSnap` next to this is critically damped, and feels eased at any speed
+ * you set it to because it never passes anything. Below ζ ≈ 0.6 the return trip
+ * becomes a second visible bounce, and a full-height boundary wobbling twice
+ * reads as a bug rather than as weight.
+ *
+ * Nothing else needs retuning when these move. Every fade in the sidebar is
+ * keyed to the rail's *width* rather than to a clock (see `FADE` in
+ * MembershipDashboard), so the choreography holds at any speed this spring
+ * runs at.
+ *
+ * `restDelta`/`restSpeed` are looser than the library's 0.001/0.01 defaults on
+ * purpose: this value is a layout width, so every frame it moves reflows the
+ * table beside it and re-evaluates its container queries. Half a pixel is below
+ * what a boundary can show, and stopping there saves an asymptotic tail that
+ * costs real layout work and displays as nothing — which matters more at this
+ * ωn, where the tail would otherwise be a larger share of the whole move.
+ */
+export const springRail: SpringOptions = {
+  stiffness: 2100,
+  damping: 62,
+  mass: 1,
+  restDelta: 0.5,
+  restSpeed: 8,
+}
+
+/**
  * A small pill snapping open into a wider one — the bottom switcher's hover
  * morph, and anything else where the shape change *is* the interaction.
  *

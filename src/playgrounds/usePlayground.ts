@@ -31,5 +31,14 @@ export function usePlayground() {
     document.title = `${active.label} · Playground`
   }, [active.label])
 
+  // Every playground owns the viewport from its own top edge, so a switch has
+  // to land at the top of the document. Only `JoinGroup` runs taller than the
+  // viewport, and leaving it part-scrolled hands the next board a non-zero
+  // `scrollTop` that the browser only clamps once the shorter document has been
+  // laid out — a frame of the new board sitting high before it snaps down.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [active.id])
+
   return { active, setActiveId }
 }

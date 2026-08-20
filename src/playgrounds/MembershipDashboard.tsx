@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from 'framer-motion'
+import type { MotionValue } from 'framer-motion'
 import { useRise } from '../components/rise'
-import { blurMorph, springSnap, transitionFast, transitionSmooth } from '../lib/motion'
+import { blurMorph, springRail, springSnap, transitionFast, transitionSmooth } from '../lib/motion'
 import { lighten } from '../lib/color'
 import { MEMBERS, TIERS, COMPANY_LOGOS, COMPANY_NAMES } from '../lib/members'
 import type { TierId, CompanyId, Member } from '../lib/members'
@@ -63,10 +64,49 @@ const SIDEBAR_LINK_SHADOW = '0px 0.254px 0.507px rgba(0,0,0,0.2), 0px 0px 1.521p
    when the pointer crosses rows: ζ ≈ 0.83, roughly 1% overshoot. */
 const NAV_PILL_SPRING = { type: 'spring', stiffness: 480, damping: 28, mass: 0.6 } as const
 
-/* The badge is a small, non-bouncy second-order system. At these values
-   ζ = c / (2√(km)) ≈ 1.00 and ωn = √(k/m) ≈ 28.3 rad/s, so it settles in
-   about 140ms without overshooting or losing velocity when the rail reverses. */
-const NAV_BADGE_SPRING = { type: 'spring', stiffness: 480, damping: 34, mass: 0.6 } as const
+/* ---- The rail ----
+
+   Minimise/maximise is one spring and nothing else. `railWidth` is the only
+   thing in the sidebar that is animated: every other value that changes on
+   collapse — the nav rows' hit width, the toggle's position and rotation, the
+   workspace pill's width, and every fade — is a `useTransform` read off it, so
+   there is exactly one mass moving and everything else is rigidly attached to
+   it.
+
+   That is a different thing from a dozen springs sharing a config, which is
+   what this was. Springs given the same numbers still integrate separately, so
+   an interrupted collapse left each one mid-flight with its own velocity and
+   they arrived at slightly different times — a rail that shears rather than
+   moves. Reading one value cannot drift: reverse the rail halfway and the
+   labels, badges, and chevron reverse on exactly the frame it does, because
+   they are not animating at all.
+
+   It is also most of the per-frame cost gone. One `JSAnimation` drives one
+   layout-affecting width; the transforms are arithmetic on the value's change
+   notification and none of them re-render React. */
+const RAIL_MIN = 56
+const RAIL_MAX = 223
+
+/* Fades below are expressed as the two rail *widths* they run between, not as
+   durations or as fractions of the travel. The rail's edge is a shutter passing
+   over fixed content, so what matters is where the edge is when a thing goes:
+   each window is chosen to finish just wider than the element's own right edge,
+   so nothing is ever caught sitting half-clipped by the boundary. Rewrite the
+   sidebar's geometry and these are the numbers to move; change the spring and
+   they need no attention at all. */
+const FADE = {
+  /* Logo + wordmark end at x ≈ 128. */
+  logo: [140, 190],
+  /* Workspace name needs ~123px of pill to sit in. */
+  workspaceLabel: [155, 205],
+  /* Longest nav label ("Domain Expert") ends at x ≈ 138. */
+  navLabel: [145, 195],
+  /* The hover plate is 217px wide and clipped for most of the travel. */
+  navPill: [165, 210],
+  /* The "New" tag ends at x ≈ 209 — it can only ever ride out behind the
+     edge, so this one fades on the way rather than ahead of it. */
+  navBadge: [185, 215],
+}
 
 type SortKey = 'name' | 'email' | 'tier' | 'company' | 'dateJoined'
 type SortDir = 'asc' | 'desc'
@@ -320,12 +360,17 @@ function FilterableColLabel<T extends string>({
  * that bleeds past both edges of whichever row is active or moused over.
  * One persistent layer follows the hovered row so it trails rather than
  * disappearing and remounting between pointer events. */
-function NavHoverPill({ index, visible }: { index: number; visible: boolean }) {
+/* `y` is its own spring — it tracks the pointer, which the rail knows nothing
+   about. `opacity` is not: the plate is 217px wide inside a rail that spends
+   most of the collapse narrower than that, so it has to leave as a function of
+   where the edge is rather than on a clock of its own. */
+function NavHoverPill({ index, opacity }: { index: number; opacity: MotionValue<number> }) {
   return (
     <motion.div
       initial={false}
-      animate={{ y: index * 34 + 2, opacity: visible ? 1 : 0 }}
-      transition={{ y: NAV_PILL_SPRING, opacity: { duration: 0.12, ease: 'easeOut' } }}
+      animate={{ y: index * 34 + 2 }}
+      transition={{ y: NAV_PILL_SPRING }}
+      style={{ opacity }}
       className="pointer-events-none absolute left-[-29px] top-0 z-0 h-[12px] w-[217px]"
     >
       <div className="absolute -inset-x-[4.61%] -inset-y-[83.33%]">
@@ -892,6 +937,40 @@ export function MembershipDashboard() {
   const [companyFilter, setCompanyFilter] = useState<Set<CompanyId>>(new Set())
   const [openFilter, setOpenFilter] = useState<'tier' | 'company' | null>(null)
   const rise = useRise()
+  const reducedMotion = useReducedMotion()
+
+  /* The rail's one degree of freedom. `collapsed` stays React state because
+     things other than geometry read it — the tooltips only exist minimized —
+     but the width itself never round-trips through a render: `set` hands the
+     spring a new target and it integrates on the frame loop from there. */
+  const railWidth = useSpring(RAIL_MAX, springRail)
+  useEffect(() => {
+    const target = collapsed ? RAIL_MIN : RAIL_MAX
+    /* `jump`, not `set`: it writes the value and clears the velocity with it,
+       so reduced motion gets the state change with no travel at all rather
+       than a very fast spring. */
+    if (reducedMotion) railWidth.jump(target)
+    else railWidth.set(target)
+  }, [collapsed, reducedMotion, railWidth])
+
+  /* Geometry rigidly attached to the edge. `clamp: false` on the toggle so the
+     spring's 4% overshoot carries into it — the control is *on* the rail, and
+     an arrow that lands dead while the boundary behind it is still settling is
+     the one thing that would give the trick away. The two widths stay clamped:
+     past their ends they would only squash content inside a clip. */
+  const navRowWidth = useTransform(railWidth, [RAIL_MIN, RAIL_MAX], [16, 184])
+  const workspaceWidth = useTransform(railWidth, [RAIL_MIN, RAIL_MAX], [28, 189])
+  const togglerLeft = useTransform(railWidth, [RAIL_MIN, RAIL_MAX], [20, 183], { clamp: false })
+  const togglerRotate = useTransform(railWidth, [RAIL_MIN, RAIL_MAX], [180, 0], { clamp: false })
+
+  /* Opacity is clamped, always: these read as a shutter uncovering content, and
+     a spring that overshoots into opacity 1.04 has nowhere to put it. */
+  const logoOpacity = useTransform(railWidth, FADE.logo, [0, 1])
+  const workspaceLabelOpacity = useTransform(railWidth, FADE.workspaceLabel, [0, 1])
+  const navLabelOpacity = useTransform(railWidth, FADE.navLabel, [0, 1])
+  const navPillOpacity = useTransform(railWidth, FADE.navPill, [0, 1])
+  const navBadgeOpacity = useTransform(railWidth, FADE.navBadge, [0, 1])
+  const navBadgeScale = useTransform(railWidth, FADE.navBadge, [0.86, 1])
 
   const toggleChecked = useCallback((id: number) => {
     setPending(null)
@@ -1052,141 +1131,134 @@ export function MembershipDashboard() {
       transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       className="@container relative flex h-svh w-full overflow-hidden bg-white"
     >
-      {/* ---- Sidebar ---- */}
+      {/* ---- Sidebar ----
+           `width` comes off the spring as a motion value and never through a
+           render; only the workspace re-theme is an `animate` target, and that
+           one genuinely is a discrete state change on a clock. */}
       <motion.div
-        animate={{
-          width: collapsed ? 56 : 223,
-          backgroundColor: workspace.sidebar,
-        }}
-        transition={{
-          width: springSnap,
-          backgroundColor: { duration: 0.4, ease: 'easeOut' },
-        }}
+        style={{ width: railWidth }}
+        animate={{ backgroundColor: workspace.sidebar }}
+        transition={{ backgroundColor: { duration: 0.4, ease: 'easeOut' } }}
         className="relative h-full shrink-0 overflow-hidden"
       >
         {/* One physical control travels with the rail: right-aligned in the
-            expanded state, then into the centered icon column when minimized. */}
+            expanded state, then into the centered icon column when minimized.
+            Both its position and its rotation are the rail's own position read
+            twice, so it arrives — and overshoots — with the edge it rides. */}
         <motion.button
-          initial={false}
           type="button"
           onClick={() => { setCollapsed(value => !value); setNavTooltip(null) }}
-          animate={{ left: collapsed ? 20 : 183, rotate: collapsed ? 180 : 0 }}
-          transition={{ left: springSnap, rotate: springSnap }}
+          style={{ left: togglerLeft, rotate: togglerRotate }}
           className="absolute top-[16px] z-20 flex h-6 w-4 cursor-pointer items-start justify-center opacity-60 transition-opacity duration-150 hover:opacity-100"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           <img src={iconCollapseArrow} alt="" className="mt-1 size-4" />
         </motion.button>
 
-        {/* ---- Expanded content ---- */}
+        {/* Logo + wordmark. Nothing replaces it minimized — the top of the rail
+            is just the toggle — so this is the one piece of chrome that only
+            has to leave, and it leaves as the edge reaches it. */}
         <motion.div
-          animate={{ opacity: collapsed ? 0 : 1 }}
-          transition={{ opacity: { ...springSnap, delay: collapsed ? 0 : 0.08 } }}
-          className="pointer-events-auto absolute inset-0"
-          style={{ pointerEvents: collapsed ? 'none' : 'auto' }}
+          style={{ opacity: logoOpacity }}
+          className="pointer-events-none absolute left-[16px] top-[16px] flex items-center gap-[6px]"
         >
-          <div className="absolute left-[16px] top-[16px] flex items-center gap-[6px]">
-            <motion.div
-              animate={{ backgroundColor: logoMarkColor }}
-              transition={{ duration: 0.4, ease: 'easeOut' }}
-              className="flex size-6 shrink-0 items-center justify-center rounded-[25%]"
-            >
-              <img src={sailboatGlyph} alt="" className="w-[72%]" />
-            </motion.div>
-            <span
-              className="text-[18px] font-semibold text-white whitespace-nowrap tracking-[-0.27px]"
-              style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1', textShadow: '0px 0.254px 0.507px rgba(0,0,0,0.2), 0px 0px 1.521px rgba(30,62,126,0.2)' }}
-            >
-              Sailor Pro<span className="text-[0.65em] align-top">®</span>
-            </span>
-          </div>
-
-          {/* Workspace selector */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setWorkspaceOpen(o => !o)}
-              className="absolute left-[14px] top-[56px] h-[28px] w-[189px] cursor-pointer overflow-hidden rounded-lg p-[6px]"
-              style={{ boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}
-            >
-              <div className="absolute inset-0 rounded-lg bg-white/7" style={{ backdropFilter: 'blur(21.2px)' }} />
-              <div className="relative flex items-center gap-[6px]">
-                <WorkspaceInitial workspace={workspace} className="size-4" />
-                <div className="flex flex-1 items-center justify-between">
-                  <span className="text-[14px] font-medium text-white whitespace-nowrap leading-[16px]" style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1, "dlig" 1' }}>
-                    {workspace.name}
-                  </span>
-                  <motion.img
-                    src={iconChevronGrabber}
-                    alt=""
-                    className="size-3"
-                    animate={{ rotate: workspaceOpen ? 180 : 0 }}
-                    transition={transitionFast}
-                  />
-                </div>
-              </div>
-              <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: 'inset 0px 1px 2px 0px rgba(149,149,149,0.1)' }} />
-            </button>
-
-            {workspaceOpen && (
-              <button
-                type="button"
-                aria-hidden="true"
-                tabIndex={-1}
-                onClick={() => setWorkspaceOpen(false)}
-                className="fixed inset-0 z-20 cursor-default"
-              />
-            )}
-
-            <AnimatePresence>
-              {workspaceOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute left-[14px] top-[90px] z-30 w-[189px] overflow-hidden rounded-lg py-1"
-                  style={{ backgroundColor: sidebarElevated, boxShadow: '0px 4px 12px rgba(0,0,0,0.3)' }}
-                >
-                  {WORKSPACES.map(w => (
-                    <button
-                      key={w.name}
-                      type="button"
-                      onClick={() => { setWorkspace(w); setWorkspaceOpen(false) }}
-                      className={`flex w-full cursor-pointer items-center gap-[6px] px-[10px] py-[6px] text-[clamp(11px,1.2cqw,13px)] text-left transition-colors duration-100 ${w.name === workspace.name ? 'text-white bg-white/10' : 'text-[#939e95] hover:bg-white/5 hover:text-white'
-                        }`}
-                      style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1' }}
-                    >
-                      <WorkspaceInitial workspace={w} className="size-[clamp(11px,1.3cqw,14px)]" />
-                      {w.name}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
+          <motion.div
+            animate={{ backgroundColor: logoMarkColor }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="flex size-6 shrink-0 items-center justify-center rounded-[25%]"
+          >
+            <img src={sailboatGlyph} alt="" className="w-[72%]" />
+          </motion.div>
+          <span
+            className="text-[18px] font-semibold text-white whitespace-nowrap tracking-[-0.27px]"
+            style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1', textShadow: '0px 0.254px 0.507px rgba(0,0,0,0.2), 0px 0px 1.521px rgba(30,62,126,0.2)' }}
+          >
+            Sailor Pro<span className="text-[0.65em] align-top">®</span>
+          </span>
         </motion.div>
 
-        {/* ---- Collapsed content (chrome only — nav is shared) ---- */}
-        <motion.div
-          animate={{ opacity: collapsed ? 1 : 0 }}
-          transition={{ opacity: { ...springSnap, delay: collapsed ? 0.08 : 0 } }}
-          className="absolute inset-0"
-          style={{ pointerEvents: collapsed ? 'auto' : 'none' }}
+        {/* ---- Workspace selector ----
+
+            One button, not two cross-fading. The expanded pill and the
+            minimized initial were always the same object drawn twice — same
+            origin, same height, same 6px inset, same 16px initial sitting in
+            it — so the only honest thing for them to be is one element whose
+            width rides the rail. What used to be a dissolve between two
+            surfaces is now a surface changing width, and the swap that could
+            be caught mid-fade cannot happen because there is nothing to swap.
+
+            The label block is absolutely placed at its expanded geometry
+            rather than laid out in flow: as the pill narrows it should be
+            clipped by the closing edge, not reflowed into it. Flow layout
+            would drag the name and the chevron toward each other on every
+            frame — text moving under its own fade, and 7 layout passes a
+            frame for nothing. */}
+        <motion.button
+          type="button"
+          onClick={() => {
+            if (collapsed) { setCollapsed(false); setNavTooltip(null) }
+            else setWorkspaceOpen(o => !o)
+          }}
+          style={{ width: workspaceWidth, boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}
+          className="absolute left-[14px] top-[56px] z-10 h-[28px] cursor-pointer overflow-hidden rounded-lg"
+          aria-label={collapsed ? 'Expand sidebar' : 'Switch workspace'}
         >
-          {/* Workspace initial pill */}
+          <div className="absolute inset-0 rounded-lg bg-white/7" style={{ backdropFilter: 'blur(21.2px)' }} />
+          <WorkspaceInitial workspace={workspace} className="absolute left-[6px] top-[6px] size-4" />
+          <motion.div
+            style={{ opacity: workspaceLabelOpacity }}
+            className="absolute left-[28px] top-0 flex h-full w-[155px] items-center justify-between pr-[6px]"
+          >
+            <span className="text-[14px] font-medium text-white whitespace-nowrap leading-[16px]" style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1, "dlig" 1' }}>
+              {workspace.name}
+            </span>
+            <motion.img
+              src={iconChevronGrabber}
+              alt=""
+              className="size-3 shrink-0"
+              animate={{ rotate: workspaceOpen ? 180 : 0 }}
+              transition={transitionFast}
+            />
+          </motion.div>
+          <div className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: 'inset 0px 1px 2px 0px rgba(149,149,149,0.1)' }} />
+        </motion.button>
+
+        {workspaceOpen && (
           <button
             type="button"
-            onClick={() => { setCollapsed(false); setNavTooltip(null) }}
-            className="absolute left-[14px] top-[56px] flex h-[28px] w-[28px] cursor-pointer items-center justify-center overflow-hidden rounded-lg p-[6px]"
-            style={{ boxShadow: '0px 0.5px 4px 0px rgba(0,0,0,0.2)' }}
-          >
-            <div className="absolute inset-0 rounded-lg bg-white/7" style={{ backdropFilter: 'blur(21.2px)' }} />
-            <div className="absolute inset-0 pointer-events-none rounded-lg" style={{ boxShadow: 'inset 0px 1px 2px 0px rgba(149,149,149,0.1)' }} />
-            <WorkspaceInitial workspace={workspace} className="relative size-4" />
-          </button>
-        </motion.div>
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={() => setWorkspaceOpen(false)}
+            className="fixed inset-0 z-20 cursor-default"
+          />
+        )}
+
+        <AnimatePresence>
+          {workspaceOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              className="absolute left-[14px] top-[90px] z-30 w-[189px] overflow-hidden rounded-lg py-1"
+              style={{ backgroundColor: sidebarElevated, boxShadow: '0px 4px 12px rgba(0,0,0,0.3)' }}
+            >
+              {WORKSPACES.map(w => (
+                <button
+                  key={w.name}
+                  type="button"
+                  onClick={() => { setWorkspace(w); setWorkspaceOpen(false) }}
+                  className={`flex w-full cursor-pointer items-center gap-[6px] px-[10px] py-[6px] text-[clamp(11px,1.2cqw,13px)] text-left transition-colors duration-100 ${w.name === workspace.name ? 'text-white bg-white/10' : 'text-[#939e95] hover:bg-white/5 hover:text-white'
+                    }`}
+                  style={{ fontFamily: "'Inter Display', sans-serif", fontFeatureSettings: '"salt" 1' }}
+                >
+                  <WorkspaceInitial workspace={w} className="size-[clamp(11px,1.3cqw,14px)]" />
+                  {w.name}
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Shared nav — one tree so icons never remount or shift on collapse.
             Rows keep the Figma geometry while labels and badges stay anchored
@@ -1195,12 +1267,11 @@ export function MembershipDashboard() {
           className="absolute left-[20px] top-[97px] z-10 flex flex-col gap-[18px]"
           onMouseLeave={() => { setHoveredNav(null); setNavTooltip(null) }}
         >
-          <NavHoverPill index={navHighlightIndex} visible={!collapsed} />
+          <NavHoverPill index={navHighlightIndex} opacity={navPillOpacity} />
           {NAV_ITEMS.map(item => {
             const active = item.label === activeNav
             return (
               <motion.button
-                initial={false}
                 key={item.label}
                 type="button"
                 onClick={() => setActiveNav(item.label)}
@@ -1219,8 +1290,7 @@ export function MembershipDashboard() {
                   setNavTooltip(null)
                 }}
                 className="relative z-[1] h-4 cursor-pointer text-left"
-                animate={{ width: collapsed ? 16 : 184 }}
-                transition={{ width: springSnap }}
+                style={{ width: navRowWidth }}
                 aria-label={item.label}
               >
                 <img
@@ -1229,10 +1299,9 @@ export function MembershipDashboard() {
                   className="absolute left-0 top-0 z-10 size-4 shrink-0"
                 />
                 <motion.span
-                  animate={{ opacity: collapsed ? 0 : 1 }}
-                  transition={{ opacity: springSnap }}
                   className="pointer-events-none absolute left-[22px] top-1/2 z-10 -translate-y-1/2 text-[14px] font-medium whitespace-nowrap leading-[16px]"
                   style={{
+                    opacity: navLabelOpacity,
                     fontFamily: "'Inter Display', sans-serif",
                     fontFeatureSettings: '"salt" 1',
                     color: active ? '#ffffff' : '#939e95',
@@ -1243,14 +1312,19 @@ export function MembershipDashboard() {
                 </motion.span>
                 {/* Keep the tag at its Figma x-position while the row width
                     contracts. Its old `right: 0` anchor made it fly left
-                    through the icon rail during collapse. */}
+                    through the icon rail during collapse.
+
+                    It sits at x ≈ 175–209 in a rail that is only 223 wide, so
+                    unlike everything else here it cannot get out of the way
+                    before the edge arrives — it goes *with* the edge, shrinking
+                    toward its right as the last 30px close over it. */}
                 {'badge' in item && (
                   <span className="pointer-events-none absolute left-[155px] top-1/2 z-10 -translate-y-1/2">
                     <motion.span
-                      animate={{ opacity: collapsed ? 0 : 1, scale: collapsed ? 0.86 : 1 }}
-                      transition={NAV_BADGE_SPRING}
                       className="flex items-center justify-center rounded-full pl-[5px] pr-[4px] py-[4px]"
                       style={{
+                        opacity: navBadgeOpacity,
+                        scale: navBadgeScale,
                         transformOrigin: 'right center',
                         boxShadow: '0px 0px 1.521px 0px rgba(30,62,126,0.2), 0px 0.254px 0.507px 0px rgba(0,0,0,0.2)',
                       }}

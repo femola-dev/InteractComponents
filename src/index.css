@@ -276,6 +276,32 @@ body {
      layout sliding up or down under the gesture. This stops the bounce without
      touching real scrolling on the playgrounds that do overflow. */
   overscroll-behavior: none;
+
+  /* No classic scrollbar on the document, ever.
+
+     The playgrounds disagree about whether the page scrolls: `JoinGroup` runs
+     taller than the viewport, the `h-svh` boards do not, and `MobileFrame` pins
+     `body { overflow: hidden }` outright for as long as it is mounted. With
+     non-overlay scrollbars — macOS set to "always show", and Windows by
+     default — that means the scrollbar appears and disappears as you page
+     through the switcher, and every one of those transitions changes the
+     viewport width by the width of the bar. Centred layouts and the fixed
+     switcher both slide sideways on the swap.
+
+     Reserving the gutter instead (`scrollbar-gutter: stable`) would also hold
+     the width steady, but it leaves a permanent empty strip down the right of
+     boards that are drawn edge-to-edge. Removing the bar from layout keeps the
+     width identical in every state and costs nothing: wheel, trackpad,
+     keyboard, and touch scrolling are untouched — only the painted bar goes. */
+  scrollbar-width: none;
+}
+
+/* `scrollbar-width` is the standard property; WebKit still needs its own
+   pseudo-element. Scoped to the document's own scroller so that any inner
+   scroll container keeps whatever scrollbar it asked for. */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
 }
 
 /* min-height, not height: playgrounds other than the device frame are free to
