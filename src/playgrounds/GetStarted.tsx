@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ease, transitionFast, springSnap } from '../lib/motion'
+import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion'
+import { blurMorph, ease, transitionFast, springSnap } from '../lib/motion'
 import { BloomLogo } from '../components/BloomLogo'
+import { GetStartedGhost } from '../components/GetStartedGhost'
 import {
   CANVAS,
   CARD_SHADOW,
@@ -12,11 +13,12 @@ import {
   MUTED,
   NAV_FOOTER,
   NAV_SECTIONS,
+  TILES,
+  TILE_BLEED,
+  destination,
   SELECTED,
   STAGE,
   STEPS,
-  TILES,
-  TILE_BLEED,
   iconCheckCircle,
   iconLoading,
   iconSidebarToggle,
@@ -69,6 +71,44 @@ function useFitScale(width: number, height: number) {
 }
 
 /**
+ * An element's height, tracked live.
+ *
+ * Needed because a CSS height cannot animate to `auto` — something has to resolve
+ * the target to a number first, and the content's own box is the only thing that
+ * knows it.
+ */
+function useMeasuredHeight<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  const [height, setHeight] = useState<number>()
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => setHeight(entry.contentRect.height))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  return { ref, height }
+}
+
+/**
+ * The card's edge travelling to a new height.
+ *
+ * A tween rather than a spring, and deliberately: a spring is the right tool
+ * when the distance is unknown or the gesture has momentum, and this has
+ * neither — it is a known travel between two measured heights, triggered by a
+ * click. `ease.smooth` puts most of the distance in the first third and lands
+ * without a settle, which is the "arrives and stops" the house springs only
+ * approximate.
+ *
+ * 0.28s against the crossfade's 0.24s. The content resolves first and the edge
+ * comes to rest just after it, so the last thing that moves is the boundary —
+ * the surface arriving rather than the surface changing size.
+ */
+const HEIGHT_MORPH: Transition = { duration: 0.28, ease: ease.smooth }
+
+/**
  * A 16px glyph box.
  *
  * Most of the file's icons are exported at exactly 16×16 and fill it. Three are
@@ -89,6 +129,44 @@ function Icon({ glyph, className }: { glyph: Glyph; className?: string }) {
       <div className="absolute" style={{ inset: glyph.inset ?? 0 }}>
         <img src={glyph.src} alt="" aria-hidden className="block size-full max-w-none" />
       </div>
+    </div>
+  )
+}
+
+/**
+ * A rail glyph, in both of the cuts Figma ships for it.
+ *
+ * The file exports each icon twice — #919191 at rest (node 344:4987) and
+ * #171717 when selected (node 351:7267) — so the state change is an asset swap,
+ * not a repaint. Worth keeping that way: the resting glyph is a different grey
+ * from the resting *label* (#737373), so icons and text run on separate ramps,
+ * which no single tint could express.
+ *
+ * Both cuts stay mounted and cross-fade rather than one `src` being swapped.
+ * Swapping the source unloads the outgoing glyph a frame before the incoming one
+ * has decoded, which shows as a blink on every click — the same reason ChatView's
+ * rail keeps both of its cuts alive.
+ *
+ * The two exports share an artboard, so both sit under the same inset and the
+ * glyph cannot shift by a sub-pixel as it changes state.
+ */
+function NavGlyph({ item, active }: { item: NavItem; active: boolean }) {
+  return (
+    <div className="relative z-1 size-[16px] shrink-0 overflow-hidden">
+      {[
+        { glyph: item.icon, shown: !active },
+        { glyph: item.activeIcon, shown: active },
+      ].map(({ glyph, shown }, i) => (
+        <motion.div
+          key={i}
+          className="absolute"
+          style={{ inset: glyph.inset ?? 0 }}
+          animate={{ opacity: shown ? 1 : 0 }}
+          transition={transitionFast}
+        >
+          <img src={glyph.src} alt="" aria-hidden className="block size-full max-w-none" />
+        </motion.div>
+      ))}
     </div>
   )
 }
@@ -155,9 +233,9 @@ function NavRow({
       {!active && (
         <div className="absolute inset-0 rounded-[6px] bg-black/[0.035] opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
       )}
-      <Icon glyph={item.icon} className="z-1" />
+      <NavGlyph item={item} active={active} />
       <p
-        className={`z-1 text-[14px] leading-[16px] font-medium tracking-[-0.28px] whitespace-nowrap ${
+        className={`z-1 text-[14px] leading-[16px] font-medium tracking-[-0.28px] whitespace-nowrap transition-colors duration-150 ${
           item.badge ? 'min-w-px flex-1' : ''
         }`}
         style={{ color: active ? INK : MUTED }}
@@ -320,6 +398,13 @@ export function GetStarted() {
     STEPS.filter(s => s.done).map(s => s.id)
   )
 
+  /* Get Started is the only destination the board specifies. Every other rail
+     row carries the archetype its own content implies, and gets that frame
+     rather than being left on this card. */
+  const { ref: cardRef, height: cardHeight } = useMeasuredHeight<HTMLDivElement>()
+  const ghost = destination(active).ghost
+  const isGetStarted = !ghost
+
   return (
     <motion.div
       ref={ref}
@@ -403,88 +488,141 @@ export function GetStarted() {
           </div>
 
           {/* ---- Main column, 515 wide at x=464, y=192 ---- */}
-          <div className="absolute top-[192px] left-[464px] flex w-[515px] flex-col items-start gap-[40px]">
-            {/* ---- The card ---- */}
-            <div
-              className="relative flex w-full shrink-0 flex-col items-start rounded-[10px] bg-white py-[20px]"
+          <div className="absolute top-[192px] left-[464px] w-[515px]">
+            {/* One persistent card surface, and the height is a real animated
+                property on it rather than a `layout` projection.
+
+                That distinction is the whole reason this used to squirm.
+                Framer's `layout` does not resize a box — it draws it at its new
+                size and applies a *scale transform* to get there, so every child
+                is squashed and stretched for the duration. Text, the hairlines
+                and the 10px corners all distort together, which reads as a
+                squishy box even though `springSnap` is critically damped and
+                never overshoots by a single pixel. Nothing here was bouncing;
+                the geometry was being deformed.
+
+                Animating `height` instead costs a layout pass per frame and
+                gives it back honestly: children sit at their natural size the
+                whole way and only the card's bottom edge moves. The tiles below
+                are in normal flow, so they ride that edge without needing any
+                animation of their own.
+
+                `overflow-hidden` clips the contents mid-travel, which is what a
+                card should do — and it does not touch this element's own
+                box-shadow, since a shadow paints outside the border box. */}
+            <motion.div
+              initial={false}
+              animate={cardHeight == null ? undefined : { height: cardHeight }}
+              transition={HEIGHT_MORPH}
+              className="relative w-full overflow-hidden rounded-[10px] bg-white"
               style={{ boxShadow: CARD_SHADOW }}
             >
-              <div className="flex w-full shrink-0 flex-col items-start gap-[8px]">
-                <div className="flex w-full shrink-0 flex-col items-start gap-[8px] px-[20px] pt-[4px] pb-[20px]">
-                  <p
-                    className="text-[16px] leading-[normal] font-medium tracking-[-0.32px]"
-                    style={{ color: INK }}
-                  >
-                    Welcome to Bloom<span className="text-[10.32px]">™</span>
-                  </p>
-                  {/* 14px rather than the file's 12px. The two metrics that
-                      travel with it are kept proportional rather than copied
-                      from the design's other 14px style (the rail labels):
-                      tracking stays at -0.02em, which is -0.28px here, and the
-                      leading holds the paragraph's own 4:3 ratio at 19px. The
-                      rail's 16px leading is a single-line label spec and would
-                      read as cramped across three wrapped lines. */}
-                  <p
-                    className="w-[368px] text-[14px] leading-[19px] font-normal tracking-[-0.28px]"
-                    style={{ color: MUTED }}
-                  >
-                    Start managing your workspace with ease. Set up your team, customize your
-                    workflow, and unlock powerful collaboration tools in just a few steps.
-                  </p>
-                </div>
+              <div ref={cardRef}>
+                {/* `popLayout` still runs the two crossfades concurrently, so
+                    the content change stays at 0.24s. It also pulls the outgoing
+                    copy out of flow, which is what lets the measured height
+                    below track the *incoming* frame from frame one. */}
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {isGetStarted ? (
+                    <motion.div
+                      key="get-started"
+                      {...blurMorph}
+                      className="relative flex w-full flex-col items-start py-[20px]"
+                    >
+                      <div className="flex w-full shrink-0 flex-col items-start gap-[8px]">
+                        <div className="flex w-full shrink-0 flex-col items-start gap-[8px] px-[20px] pt-[4px] pb-[20px]">
+                          <p
+                            className="text-[16px] leading-[normal] font-medium tracking-[-0.32px]"
+                            style={{ color: INK }}
+                          >
+                            Welcome to Bloom<span className="text-[10.32px]">™</span>
+                          </p>
+                          {/* 14px rather than the file's 12px. The two metrics that
+                              travel with it are kept proportional rather than copied
+                              from the design's other 14px style (the rail labels):
+                              tracking stays at -0.02em, which is -0.28px here, and the
+                              leading holds the paragraph's own 4:3 ratio at 19px. The
+                              rail's 16px leading is a single-line label spec and would
+                              read as cramped across three wrapped lines. */}
+                          <p
+                            className="w-[368px] text-[14px] leading-[19px] font-normal tracking-[-0.28px]"
+                            style={{ color: MUTED }}
+                          >
+                            Start managing your workspace with ease. Set up your team, customize your
+                            workflow, and unlock powerful collaboration tools in just a few steps.
+                          </p>
+                        </div>
 
-                <div className="flex w-full shrink-0 flex-col items-start gap-[8px]">
-                  {STEPS.map(step => (
-                    <div key={step.id} className="contents">
-                      <Divider width="100%" />
-                      <StepRow
-                        step={step}
-                        done={completed.includes(step.id)}
-                        onComplete={() =>
-                          setCompleted(prev =>
-                            prev.includes(step.id) ? prev : [...prev, step.id]
-                          )
-                        }
-                      />
+                        <div className="flex w-full shrink-0 flex-col items-start gap-[8px]">
+                          {STEPS.map(step => (
+                            <div key={step.id} className="contents">
+                              <Divider width="100%" />
+                              <StepRow
+                                step={step}
+                                done={completed.includes(step.id)}
+                                onComplete={() =>
+                                  setCompleted(prev =>
+                                    prev.includes(step.id) ? prev : [...prev, step.id]
+                                  )
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* The badge cluster, breaking out over the card's top-right
+                          corner. Three copies of the mark at 32.74 / 17.33 / 22px, each
+                          with its flower at a different angle. */}
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute top-[22px] left-[429px] h-[57px] w-[69px]"
+                      >
+                        {CLUSTER.map(gear => (
+                          <BloomLogo
+                            key={gear.size}
+                            size={gear.size}
+                            angle={gear.angle}
+                            spin={{
+                              // Period scales with diameter, so the small plates turn
+                              // faster than the one driving them by exactly their size
+                              // ratio — see CLUSTER.
+                              seconds: GEAR_PERIOD * (gear.size / CLUSTER[0].size),
+                              direction: gear.direction,
+                            }}
+                            className="absolute"
+                            style={{ top: gear.top, left: gear.left }}
+                          />
+                        ))}
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div key={active} {...blurMorph} className="w-full">
+                      <GetStartedGhost title={active} layout={ghost} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+
+            {/* ---- Help tiles ----
+                Get Started's footer, not shell furniture, so they come and go
+                with it. In flow under the card rather than inside it: the card
+                clips its own contents, and these have to sit outside that clip
+                while still following the edge as it travels. */}
+            <AnimatePresence initial={false}>
+              {isGetStarted && (
+                <motion.div key="tiles" {...blurMorph} className="w-full pt-[40px]">
+                  <div className="relative h-[122px] w-full shrink-0">
+                    <div className="absolute top-0 left-1/2 flex -translate-x-1/2 items-center gap-[2px]">
+                      {TILES.map((tile, i) => (
+                        <HelpTile key={tile.label} tile={tile} width={i === 1 ? 159 : 158} />
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* The badge cluster, breaking out over the card's top-right
-                  corner. Three copies of the mark at 32.74 / 17.33 / 22px, each
-                  with its flower at a different angle. */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute top-[22px] left-[429px] h-[57px] w-[69px]"
-              >
-                {CLUSTER.map(gear => (
-                  <BloomLogo
-                    key={gear.size}
-                    size={gear.size}
-                    angle={gear.angle}
-                    spin={{
-                      // Period scales with diameter, so the small plates turn
-                      // faster than the one driving them by exactly their size
-                      // ratio — see CLUSTER.
-                      seconds: GEAR_PERIOD * (gear.size / CLUSTER[0].size),
-                      direction: gear.direction,
-                    }}
-                    className="absolute"
-                    style={{ top: gear.top, left: gear.left }}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* ---- Help tiles ---- */}
-            <div className="relative h-[122px] w-full shrink-0">
-              <div className="absolute top-0 left-1/2 flex -translate-x-1/2 items-center gap-[2px]">
-                {TILES.map((tile, i) => (
-                  <HelpTile key={tile.label} tile={tile} width={i === 1 ? 159 : 158} />
-                ))}
-              </div>
-            </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
