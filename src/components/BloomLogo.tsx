@@ -1,5 +1,4 @@
 import type { CSSProperties } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '../lib/utils'
 import logoBase from '../assets/icons/get-started/logo-base.svg'
 import logoNoise from '../assets/icons/get-started/logo-noise.svg'
@@ -72,11 +71,9 @@ export function BloomLogo({
    *  Tailwind values for each one. */
   style?: CSSProperties
 }) {
-  const reduced = useReducedMotion()
   const width = size * PETAL.width
   const height = size * PETAL.height
   const base = -angle
-  const turning = spin && !reduced
 
   return (
     /* Merged rather than concatenated, and the size stays inline because it is
@@ -95,22 +92,48 @@ export function BloomLogo({
         aria-hidden
         className="absolute inset-0 size-full mix-blend-overlay"
       />
-      <motion.div
+      {/* Two nested boxes, because the flower carries two rotations that must
+          not share an element: the outer one holds the angle the file draws it
+          at, the inner one turns.
+
+          The turn is a CSS keyframe animation and not a Framer one, and this is
+          the second time that distinction has bitten this page. Framer's
+          `repeat: Infinity` never started here, because this cluster renders
+          inside `AnimatePresence initial={false}` — which mounts descendants
+          straight at their `animate` values without running a transition, so the
+          loop had nothing to kick it off.
+
+          That it worked in dev and not in production is `StrictMode`: React
+          double-mounts in development, and the second mount is no longer the
+          presence context's *initial* render, so the animation ran. Production
+          mounts once, the suppression stands, and the gears sit still. A
+          keyframe animation is outside presence entirely and cannot be
+          suppressed by it — and it runs on the compositor rather than through
+          JS, which for three elements turning forever is where it belongs. */}
+      <div
         className="absolute"
         style={{
           width,
           height,
           left: size * PETAL_CENTER.x - width / 2,
           top: size * PETAL_CENTER.y - height / 2,
-          rotate: base,
+          transform: `rotate(${base}deg)`,
         }}
-        animate={turning ? { rotate: [base, base + spin.direction * 360] } : { rotate: base }}
-        transition={
-          turning
-            ? { duration: spin.seconds, repeat: Infinity, ease: 'linear' }
-            : { duration: 0 }
-        }
       >
+        <div
+          className={`relative size-full ${spin ? 'animate-spin motion-reduce:animate-none' : ''}`}
+          style={
+            spin
+              ? {
+                  animationDuration: `${spin.seconds}s`,
+                  animationTimingFunction: 'linear',
+                  // Tailwind's `spin` keyframes run clockwise; a counter-rotating
+                  // gear plays the same keyframes backwards.
+                  animationDirection: spin.direction === -1 ? 'reverse' : 'normal',
+                }
+              : undefined
+          }
+        >
         {/* The bleed is carried by a box rather than by the image's own
             offsets: an absolutely positioned replaced element with all four
             offsets set still resolves `width: auto` to its intrinsic size, so
@@ -126,8 +149,9 @@ export function BloomLogo({
           }}
         >
           <img src={logoPetal} alt="" aria-hidden className="block size-full max-w-none" />
+          </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }
