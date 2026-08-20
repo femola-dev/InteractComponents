@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion, useReducedMotion, type Transition } from 'framer-motion'
-import { blurMorph, ease, transitionFast, springSnap } from '../lib/motion'
+import { AnimatePresence, motion, type Transition } from 'framer-motion'
+import { blurMorph, ease, springOvershoot, springSnap, transitionFast } from '../lib/motion'
 import { BloomLogo } from '../components/BloomLogo'
 import { GetStartedGhost } from '../components/GetStartedGhost'
 import {
@@ -107,6 +107,22 @@ function useMeasuredHeight<T extends HTMLElement>() {
  * the surface arriving rather than the surface changing size.
  */
 const HEIGHT_MORPH: Transition = { duration: 0.28, ease: ease.smooth }
+
+/** The description's box: its 16px line plus the 4px that separates it. */
+const DESCRIPTION_HEIGHT = 20
+
+/**
+ * A description closing as its step completes.
+ *
+ * Two speeds on purpose. The ink leaves in 0.16s and the space takes 0.26s to
+ * close, so the text has fully dissolved before the box is narrow enough to crop
+ * it — run them at one speed and you watch a line of type get guillotined.
+ */
+const DESCRIPTION_MORPH = {
+  height: { duration: 0.26, ease: ease.smooth },
+  opacity: { duration: 0.16, ease: ease.smooth },
+  filter: { duration: 0.16, ease: ease.smooth },
+} as const
 
 /**
  * A 16px glyph box.
@@ -260,13 +276,20 @@ function Divider({ width }: { width: number | string }) {
  * padding, exactly as the file measures it.
  */
 function StepRow({ step, done, onComplete }: { step: Step; done: boolean; onComplete: () => void }) {
-  const reduced = useReducedMotion()
-
   return (
     <button
       type="button"
       onClick={onComplete}
       disabled={done}
+      /* One height for every row, declared rather than derived.
+         The board draws the completed "Workspace created" row at 48 and the
+         three pending ones at 60, because it sizes each to its own content. Held
+         that way in a live page the card would shorten under the cursor on every
+         completion, and the first row would sit shorter than its neighbours for
+         no reason the reader can see. A single 60 removes both: completing a
+         step changes nothing about the card's geometry, and the row rhythm is
+         even top to bottom. The title travels instead of the box. */
+      style={{ height: 60 }}
       className="group relative flex w-full items-center gap-[16px] py-[12px] pr-[32px] pl-[20px] text-left outline-none focus-visible:ring-2 focus-visible:ring-black/20 enabled:cursor-pointer"
     >
       {!done && (
@@ -283,61 +306,92 @@ function StepRow({ step, done, onComplete }: { step: Step; done: boolean; onComp
         <Icon glyph={step.icon} className="absolute top-[4px] left-[4px]" />
       </div>
 
-      <div className="z-1 flex min-w-px flex-1 flex-col justify-center gap-[4px]">
-        {/* 14px against the description's 12px. Leading deliberately stays at
-            16px, which is the design's own spec for 14px single-line labels
-            (the rail rows are 14/16/-0.28) — and it is what keeps every row's
-            height unchanged: the two-line block stays 16+4+16=36, and the
-            single-line row stays governed by the 24px disc beside it. Tracking
-            follows the file's constant -0.02em, so 12px's -0.24 becomes -0.28. */}
+      {/* No flex `gap` here, deliberately. The 4px belongs to the description as
+          padding so that it leaves *with* it — a gap is a property of the
+          container and would hold 4px of air open after the description had
+          gone, leaving the title permanently 2px off centre. */}
+      <div className="z-1 flex min-w-px flex-1 flex-col justify-center">
+        {/* 14px against the description's 12px, matching node 351:7382. Leading
+            stays at 16px, the design's own spec for 14px single-line labels, and
+            tracking follows the file's constant -0.02em. */}
         <p
           className="text-[14px] leading-[16px] font-medium tracking-[-0.28px] whitespace-nowrap"
           style={{ color: INK }}
         >
           {step.title}
         </p>
-        {step.description && (
-          <p
-            className="text-[12px] leading-[16px] font-normal tracking-[-0.24px] whitespace-nowrap"
-            style={{ color: MUTED }}
-          >
-            {step.description}
-          </p>
-        )}
+        {/* The description does not hide, it closes. Its height carries the text
+            column from 36px down to 16px, and because that column is
+            `justify-center` inside a row whose height is now fixed, the title
+            glides to the middle as a *consequence* of the collapse rather than
+            as a second animation aimed at it. No `layout` prop anywhere — the
+            height is real, so the type is never scale-distorted. */}
+        <AnimatePresence initial={false}>
+          {!done && step.description && (
+            <motion.p
+              key="description"
+              initial={{ height: 0, opacity: 0, filter: 'blur(3px)' }}
+              animate={{ height: DESCRIPTION_HEIGHT, opacity: 1, filter: 'blur(0px)' }}
+              exit={{ height: 0, opacity: 0, filter: 'blur(3px)' }}
+              transition={DESCRIPTION_MORPH}
+              className="overflow-hidden pt-[4px] text-[12px] leading-[16px] font-normal tracking-[-0.24px] whitespace-nowrap"
+              style={{ color: MUTED }}
+            >
+              {step.description}
+            </motion.p>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* The two states swap in place. The spinner is the file's own `Loading`
-          glyph — a broken ring, which is a drawing of something turning, so it
-          turns. */}
+      {/* The spinner resolving into the check.
+          The two overlap rather than queue: the ring shrinks away while the tick
+          springs up through it, so there is never an empty frame between them.
+          The tick rides `springOvershoot`, passing its size by a few percent
+          before settling — the one place on this page where elasticity is right,
+          because a completion is a small discrete event that should read as
+          having snapped into place. */}
       <div className="relative z-1 size-[24px] shrink-0 rounded-full">
         <AnimatePresence initial={false}>
           {done ? (
-            <motion.img
+            <motion.div
               key="done"
-              src={iconCheckCircle}
-              alt=""
-              aria-hidden
-              initial={{ opacity: 0, scale: 0.6 }}
+              initial={{ opacity: 0, scale: 0.4 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.6 }}
+              exit={{ opacity: 0, scale: 0.4 }}
+              transition={springOvershoot}
+              className="absolute top-[4px] left-[4px] size-[16px]"
+            >
+              <img src={iconCheckCircle} alt="" aria-hidden className="block size-full" />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="pending"
+              initial={{ opacity: 0, scale: 1 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.5 }}
               transition={transitionFast}
               className="absolute top-[4px] left-[4px] size-[16px]"
-            />
-          ) : (
-            <motion.img
-              key="pending"
-              src={iconLoading}
-              alt=""
-              aria-hidden
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1, rotate: reduced ? 0 : 360 }}
-              exit={{ opacity: 0 }}
-              transition={{
-                opacity: transitionFast,
-                rotate: { duration: 1.4, repeat: Infinity, ease: 'linear' },
-              }}
-              className="absolute top-[4px] left-[4px] size-[16px]"
-            />
+            >
+              {/* The spin is a CSS animation on a *different element* from the
+                  one Framer drives, and both halves of that matter.
+
+                  Different element, because Framer writes `transform` inline for
+                  the presence scale and a CSS animation on the same property
+                  would fight it.
+
+                  CSS at all, because `AnimatePresence initial={false}` mounts its
+                  children straight at their `animate` values without running a
+                  transition — so a Framer `rotate: 360, repeat: Infinity` is set
+                  instantly and the loop never starts. That is why these sat
+                  still. A keyframe animation is outside presence entirely, and
+                  it runs on the compositor rather than through JS. */}
+              <img
+                src={iconLoading}
+                alt=""
+                aria-hidden
+                className="block size-full animate-spin [animation-duration:1.4s] motion-reduce:animate-none"
+              />
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
@@ -527,7 +581,7 @@ export function GetStarted() {
                     <motion.div
                       key="get-started"
                       {...blurMorph}
-                      className="relative flex w-full flex-col items-start py-[20px]"
+                      className="relative flex w-full flex-col items-start pt-[20px] pb-[12px]"
                     >
                       <div className="flex w-full shrink-0 flex-col items-start gap-[8px]">
                         <div className="flex w-full shrink-0 flex-col items-start gap-[8px] px-[20px] pt-[4px] pb-[20px]">
